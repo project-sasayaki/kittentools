@@ -64,7 +64,16 @@ static int jvsPacketSize = -1;
 
 int initBaseboard()
 {
-    sram = fopen(Config.path.sram_path, "wb+");
+    sram = fopen(Config.path.sram_path, "rb+");
+    if (sram == NULL)
+    {
+        sram = fopen(Config.path.sram_path, "w+b");
+        if (sram == NULL)
+        {
+            log_error(plfBoot, "Cannot create sram file.");
+            return -1;
+        }
+    }
     fseek(sram, 0, SEEK_SET);
 
     return 0;
@@ -173,6 +182,7 @@ int baseboardIoctl(int fd, unsigned long request, void *data)
         case BC_CMD_SRAM_COPY_TO:
             fseek(sram, ((writeData_t *)data)->offset, SEEK_SET);
             fwrite(((writeData_t *)data)->data, 1, ((writeData_t *)data)->size, sram);
+            fflush(sram);
             return 0;
             break;
 

@@ -13,11 +13,14 @@
 
 static int idas_connect(SOCKET s, const struct sockaddr *name, int namelen);
 static int idas_bind(SOCKET s, const struct sockaddr *name, int namelen);
+static int idas_send(SOCKET s, const char *buf, int len, int flags);
 static int idas_sendto(SOCKET s, const char *buf, int len, int flags, const struct sockaddr *to, int tolen);
+static void ensure_source_ip(SOCKET s, const SOCKADDR_IN *dst);
 static const netFunc idas_net_func = {
     .connect            = idas_connect,
-    .bind               = idas_bind,  
-    .sendto             = idas_sendto,    
+    .bind               = idas_bind,
+    .send               = idas_send,
+    .sendto             = idas_sendto,
 };
 
 int (__cdecl *next_amOsinfoGetNetworkProperty)(DWORD *a1);
@@ -50,6 +53,8 @@ static void overrideSubnet(uintptr_t addr)
 /* ===================================================================== */
 static int idas_connect(SOCKET s, const struct sockaddr *name, int namelen)
 {
+    ensure_source_ip(s, (PSOCKADDR_IN)name);
+
     uint32_t addr = _byteswap_ulong(((SOCKADDR_IN*)name)->sin_addr.S_un.S_addr);
     USHORT port = _byteswap_ushort(((SOCKADDR_IN*)name)->sin_port);
 
@@ -92,10 +97,96 @@ static int idas_connect(SOCKET s, const struct sockaddr *name, int namelen)
     
 }
 
+static bool serverbox_bind_ip_ready = false;
+static uint32_t serverbox_bind_ip = 0;  // network byte order; 0 = disabled
+
+static uint32_t get_serverbox_bind_ip(void)
+{
+    if (!serverbox_bind_ip_ready) {
+        serverbox_bind_ip_ready = true;
+        const char *bind_ip = Config.network.bind_ip;
+        if (bind_ip != NULL && bind_ip[0] != '\0') {
+            serverbox_bind_ip = inet_addr(bind_ip);
+            if (serverbox_bind_ip == INADDR_NONE || serverbox_bind_ip == INADDR_ANY) {
+                log_error(plfNetwork,
+                          "Invalid network.bind_ip %s, dedicated-IP mode disabled", bind_ip);
+                serverbox_bind_ip = 0;
+            }
+        }
+    }
+    return serverbox_bind_ip;
+}
+
+static bool game_ip_ready = false;
+static uint32_t game_ip = 0;  // network byte order; 0 = disabled
+
+static uint32_t get_game_ip(void)
+{
+    if (!game_ip_ready) {
+        game_ip_ready = true;
+        const char *ip = Config.network.game_ip;
+        if (ip != NULL && ip[0] != '\0') {
+            game_ip = inet_addr(ip);
+            if (game_ip == INADDR_NONE || game_ip == INADDR_ANY) {
+                log_error(plfNetwork, "Invalid network.game_ip %s, ignoring", ip);
+                game_ip = 0;
+            }
+        }
+    }
+    return game_ip;
+}
+
+static void ensure_source_ip(SOCKET s, const SOCKADDR_IN *dst)
+{
+    if (dst != NULL && (ntohl(dst->sin_addr.s_addr) >> 24) == 127)
+        return;  // loopback destination: source IP is irrelevant
+
+    uint32_t src = isServerBox() ? get_serverbox_bind_ip() : get_game_ip();
+    if (src == 0)
+        return;
+
+    SOCKADDR_IN local;
+    int len = sizeof(local);
+    if (getsockname(s, (SOCKADDR*)&local, &len) != 0 || local.sin_family != AF_INET)
+        return;
+    if (local.sin_addr.S_un.S_addr != INADDR_ANY || local.sin_port != 0)
+        return;  // already carries an explicit bind (or is connected)
+
+    SOCKADDR_IN bind_addr = {0};
+    bind_addr.sin_family = AF_INET;
+    bind_addr.sin_addr.s_addr = src;  // port 0: OS picks the local port
+    if (bind(s, (SOCKADDR*)&bind_addr, sizeof(bind_addr)) == SOCKET_ERROR) {
+        uint32_t n = ntohl(src);
+        log_debug(plfNetwork, "source pin to %hhu.%hhu.%hhu.%hhu failed: %d",
+                  (n >> 24) & 0xff, (n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff,
+                  WSAGetLastError());
+    }
+}
+
 static int idas_bind(SOCKET s, const struct sockaddr *name, int namelen)
 {
     ULONG addr = _byteswap_ulong(((SOCKADDR_IN*)name)->sin_addr.S_un.S_addr);
     USHORT port = _byteswap_ushort(((SOCKADDR_IN*)name)->sin_port);
+    if (name->sa_family == AF_INET && (get_serverbox_bind_ip() != 0 || get_game_ip() != 0)) {
+        // Game and ServerBox listeners share the port on different local IPs;
+        // unicast to each address is delivered to its own socket only.
+        BOOL reuse = TRUE;
+        setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (const char*)&reuse, sizeof(reuse));
+
+        uint32_t role_ip = isServerBox() ? get_serverbox_bind_ip() : get_game_ip();
+        if (role_ip != 0 && ((SOCKADDR_IN*)name)->sin_addr.S_un.S_addr == INADDR_ANY) {
+            SOCKADDR_IN addr_in = *(const SOCKADDR_IN*)name;
+            addr_in.sin_addr.s_addr = role_ip;
+
+            ULONG new_addr = ntohl(role_ip);
+            log_debug(plfNetwork, "bind(%hhu.%hhu.%hhu.%hhu:%hu -> %hhu.%hhu.%hhu.%hhu:%hu)",
+                     (addr >> 24) & 0xff, (addr >> 16) & 0xff, (addr >> 8) & 0xff, addr & 0xff,
+                     port, (new_addr >> 24) & 0xff, (new_addr >> 16) & 0xff,
+                     (new_addr >> 8) & 0xff, new_addr & 0xff, port);
+            return bind(s, (SOCKADDR*)&addr_in, sizeof(addr_in));
+        }
+        // Explicit (non-wildcard) address or no IP for this role: unchanged.
+    }
     if (isServerBox() && port != 0 && port != 65535 && Config.network.simulateNetwork)
     {
         SOCKADDR_IN addr_in = *(const SOCKADDR_IN*)name;
@@ -110,6 +201,12 @@ static int idas_bind(SOCKET s, const struct sockaddr *name, int namelen)
     log_debug(plfNetwork, "bind(%hhu.%hhu.%hhu.%hhu:%hu)", (addr >> 24) & 0xff, (addr >> 16) & 0xff,
              (addr >> 8) & 0xff, addr & 0xff, port);
     return bind(s, name, namelen);
+}
+
+static int idas_send(SOCKET s, const char *buf, int len, int flags)
+{
+    ensure_source_ip(s, NULL);
+    return send(s, buf, len, flags);
 }
 
 static int idas_sendto(SOCKET s,const char *buf,int len,int flags,const struct sockaddr *to,int tolen)
@@ -142,6 +239,31 @@ static int idas_sendto(SOCKET s,const char *buf,int len,int flags,const struct s
             ((PSOCKADDR_IN)to)->sin_port, seq);
 
         return sendto(s, buf, len, flags, (PSOCKADDR)&toLocalhost, tolen);
+    }
+
+    ensure_source_ip(s, in);
+
+    if (!isServerBox() && get_serverbox_bind_ip() != 0 && in->sin_family == AF_INET) {
+        uint32_t net_mask = ntohl(getNetHostMask());
+        if ((addr & ~net_mask) == (~net_mask)) {  // limited or subnet-directed broadcast
+            SOCKADDR_IN serverbox = *in;
+            serverbox.sin_addr.s_addr = get_serverbox_bind_ip();
+
+            uint32_t sb_addr = ntohl(get_serverbox_bind_ip());
+            log_debug(plfNetwork,
+                     "[UDP] broadcast %u.%u.%u.%u:%u -> serverbox %hhu.%hhu.%hhu.%hhu:%u",
+                     (addr >> 24) & 0xFF, (addr >> 16) & 0xFF, (addr >> 8) & 0xFF, addr & 0xFF,
+                     port_host, (sb_addr >> 24) & 0xff, (sb_addr >> 16) & 0xff,
+                     (sb_addr >> 8) & 0xff, sb_addr & 0xff, port_host);
+
+            int ret = sendto(s, buf, len, flags, (PSOCKADDR)&serverbox, sizeof(serverbox));
+            if (ret == SOCKET_ERROR)
+                log_error(plfNetwork,
+                          "[UDP] redirect to serverbox %hhu.%hhu.%hhu.%hhu:%u failed: %d",
+                          (sb_addr >> 24) & 0xff, (sb_addr >> 16) & 0xff,
+                          (sb_addr >> 8) & 0xff, sb_addr & 0xff, port_host, WSAGetLastError());
+            return ret;
+        }
     }
 
     if (!Config.network.simulateNetwork)

@@ -129,14 +129,25 @@ static void idas_input_read_analogs(uint16_t *analogs, uint8_t nanalogs) {
 }
 
 static void idas_input_read_coin_counter(uint8_t slot_no, uint16_t *out) {
+    bool coin_pressed;
+    uint8_t sysbtn = 0;
+
     if ( !out)
         return;
     
     if (slot_no > 0)
         return;
 
-    if (Config.io3.coin &&
-            (GetAsyncKeyState(Config.io3.coin) & 0x8000)) {
+    /* Pull coin from the device (wheel button / XInput button) if the backend
+       supports it, then OR with the keyboard coin fallback. */
+    if (idas_io_backend != NULL && idas_io_backend->jvs_read_system != NULL) {
+        idas_io_backend->jvs_read_system(&sysbtn);
+    }
+
+    coin_pressed = (sysbtn & IDAS_IO_SYSBTN_COIN) ||
+        (Config.io3.coin && (GetAsyncKeyState(Config.io3.coin) & 0x8000));
+
+    if (coin_pressed) {
         if (!idas_io_coin) {
             idas_io_coin = true;
             idas_io_coins++;

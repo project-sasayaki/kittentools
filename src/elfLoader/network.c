@@ -583,8 +583,6 @@ int hook_sendto(int fd, const char *buf, int len, int flags, const struct sockad
 {
     SOCKET s = fd_to_socket(fd);
     flags &= ~(0x4000 | 0x40);
-    int dontfrag = 1;
-    setsockopt(s, IPPROTO_IP, IP_DONTFRAGMENT, (const char*)&dontfrag, sizeof(dontfrag));
     int ttl = 64;
     setsockopt(s, IPPROTO_IP, IP_TTL, (const char*)&ttl, sizeof(ttl));
     int ret = 0;

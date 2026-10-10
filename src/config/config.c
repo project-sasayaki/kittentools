@@ -172,21 +172,21 @@ static int parseSubnetConfig() {
     
     PIP_ADAPTER_ADDRESSES pAddresses = NULL;
     ULONG outBufLen = 0;
-    
+
     GetAdaptersAddresses(AF_INET, 0, NULL, pAddresses, &outBufLen);
-    
+
     pAddresses = (PIP_ADAPTER_ADDRESSES)malloc(outBufLen);
     if (pAddresses == NULL) {
         log_error(plfBoot, "Failed to allocate memory for adapter addresses");
         return 3;
     }
-    
+
     if (GetAdaptersAddresses(AF_INET, 0, NULL, pAddresses, &outBufLen)) {
         log_error(plfBoot, "GetAdaptersAddresses failed");
         free(pAddresses);
         return 2;
     }
-    
+
     PIP_ADAPTER_ADDRESSES pCurrAddresses = pAddresses;
     while (pCurrAddresses != NULL) {
         PIP_ADAPTER_UNICAST_ADDRESS pUnicast = pCurrAddresses->FirstUnicastAddress;
@@ -194,7 +194,7 @@ static int parseSubnetConfig() {
             if (pUnicast->Address.lpSockaddr->sa_family == AF_INET) {
                 struct sockaddr_in *addr = (struct sockaddr_in *)pUnicast->Address.lpSockaddr;
                 uint32_t ip_addr = ntohl(addr->sin_addr.s_addr);
-                
+
                 if ((ip_addr & mask) == subnet_network) {
                     net_host_addr = addr->sin_addr.s_addr;
                     break;

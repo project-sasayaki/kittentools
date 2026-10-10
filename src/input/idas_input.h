@@ -14,4 +14,8 @@ enum {
     IDAS_IO_GAMEBTN_SHIFTUP = 0x80,
 };
 
+enum {
+    IDAS_IO_SYSBTN_COIN = 0x01,
+};
+
 void idas_input_init();

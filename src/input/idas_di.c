@@ -1,3 +1,4 @@
+#define DIRECTINPUT_VERSION 0x0800
 #include <dinput.h>
 #include <assert.h>
 #include "backend.h"
@@ -10,6 +11,7 @@ static uint8_t idas_di_decode_pov(DWORD pov);
 static void idas_di_jvs_read_buttons(uint8_t *gamebtn_out);
 static void idas_di_jvs_read_shifter(uint8_t *gear_out);
 static void idas_di_jvs_read_analogs(struct idas_io_analog_state *out);
+static void idas_di_jvs_read_system(uint8_t *sysbtn_out);
 static void idas_di_ffb_init(void);
 static void idas_di_ffb_toggle(bool active);
 static void idas_di_ffb_constant_force(uint8_t direction, uint8_t force);
@@ -47,6 +49,7 @@ static const struct idas_io_backend idas_di_backend = {
     .jvs_read_buttons       = idas_di_jvs_read_buttons,
     .jvs_read_shifter       = idas_di_jvs_read_shifter,
     .jvs_read_analogs       = idas_di_jvs_read_analogs,
+    .jvs_read_system        = idas_di_jvs_read_system,
     .ffb_init               = idas_di_ffb_init,
     .ffb_req_toggle         = idas_di_ffb_toggle,
     .ffb_req_constant_force = idas_di_ffb_constant_force,
@@ -65,6 +68,11 @@ static int idas_di_shift_dn;
 static int idas_di_shift_up;
 static int idas_di_view_chg;
 static int idas_di_start;
+static int idas_di_up;
+static int idas_di_down;
+static int idas_di_left;
+static int idas_di_right;
+static int idas_di_coin;
 static bool idas_di_use_pedals;
 static bool idas_di_reverse_brake_axis;
 static bool idas_di_reverse_accel_axis;
@@ -318,6 +326,36 @@ HRESULT idas_di_config_apply()
         return E_INVALIDARG;
     }
 
+    if (Config.dinput.up > 32) {
+        log_error(plfBoot, "Wheel: Invalid up button: %i", Config.dinput.up);
+
+        return E_INVALIDARG;
+    }
+
+    if (Config.dinput.down > 32) {
+        log_error(plfBoot, "Wheel: Invalid down button: %i", Config.dinput.down);
+
+        return E_INVALIDARG;
+    }
+
+    if (Config.dinput.left > 32) {
+        log_error(plfBoot, "Wheel: Invalid left button: %i", Config.dinput.left);
+
+        return E_INVALIDARG;
+    }
+
+    if (Config.dinput.right > 32) {
+        log_error(plfBoot, "Wheel: Invalid right button: %i", Config.dinput.right);
+
+        return E_INVALIDARG;
+    }
+
+    if (Config.dinput.coin > 32) {
+        log_error(plfBoot, "Wheel: Invalid coin button: %i", Config.dinput.coin);
+
+        return E_INVALIDARG;
+    }
+
     /* Print some debug output to make sure config works... */
 
     log_warn(plfMisc, "Wheel: --- Begin configuration ---");
@@ -330,6 +368,11 @@ HRESULT idas_di_config_apply()
     log_warn(plfMisc, "Wheel: View Change button  : %i", Config.dinput.viewChg);
     log_warn(plfMisc, "Wheel: Shift Down button . : %i", Config.dinput.shiftDn);
     log_warn(plfMisc, "Wheel: Shift Up button . . : %i", Config.dinput.shiftUp);
+    log_warn(plfMisc, "Wheel: Up button . . . . . : %i (0 = POV only)", Config.dinput.up);
+    log_warn(plfMisc, "Wheel: Down button . . . . : %i (0 = POV only)", Config.dinput.down);
+    log_warn(plfMisc, "Wheel: Left button . . . . : %i (0 = POV only)", Config.dinput.left);
+    log_warn(plfMisc, "Wheel: Right button . . . : %i (0 = POV only)", Config.dinput.right);
+    log_warn(plfMisc, "Wheel: Coin button . . . . : %i (0 = disabled)", Config.dinput.coin);
     log_warn(plfMisc, "Wheel: Reverse Brake Axis  : %i", Config.dinput.reverseBrakeAxis);
     log_warn(plfMisc, "Wheel: Reverse Accel Axis  : %i", Config.dinput.reverseAccelAxis);
     log_warn(plfMisc, "Wheel: ---  End  configuration ---");
@@ -354,6 +397,11 @@ HRESULT idas_di_config_apply()
     idas_di_view_chg = Config.dinput.viewChg;
     idas_di_shift_dn = Config.dinput.shiftDn;
     idas_di_shift_up = Config.dinput.shiftUp;
+    idas_di_up = Config.dinput.up;
+    idas_di_down = Config.dinput.down;
+    idas_di_left = Config.dinput.left;
+    idas_di_right = Config.dinput.right;
+    idas_di_coin = Config.dinput.coin;
     idas_di_reverse_brake_axis = Config.dinput.reverseBrakeAxis;
     idas_di_reverse_accel_axis = Config.dinput.reverseAccelAxis;
 
@@ -544,6 +592,25 @@ static void idas_di_jvs_read_buttons(uint8_t *gamebtn_out)
     if (idas_di_view_chg && state.st.rgbButtons[idas_di_view_chg - 1]) {
         gamebtn |= IDAS_IO_GAMEBTN_VIEW_CHANGE;
     }
+
+    /* Button-based D-pad, for wheels without a POV/hat (e.g. MOZA R5 Base).
+       OR-ed with the POV decode so either source works. */
+    if (idas_di_up && state.st.rgbButtons[idas_di_up - 1]) {
+        gamebtn |= IDAS_IO_GAMEBTN_UP;
+    }
+
+    if (idas_di_down && state.st.rgbButtons[idas_di_down - 1]) {
+        gamebtn |= IDAS_IO_GAMEBTN_DOWN;
+    }
+
+    if (idas_di_left && state.st.rgbButtons[idas_di_left - 1]) {
+        gamebtn |= IDAS_IO_GAMEBTN_LEFT;
+    }
+
+    if (idas_di_right && state.st.rgbButtons[idas_di_right - 1]) {
+        gamebtn |= IDAS_IO_GAMEBTN_RIGHT;
+    }
+
     *gamebtn_out = gamebtn;
 }
 
@@ -620,6 +687,31 @@ static void idas_di_jvs_read_analogs(struct idas_io_analog_state *out)
     } else {
         out->accel = 65535 - *accel;
     }
+}
+
+static void idas_di_jvs_read_system(uint8_t *sysbtn_out)
+{
+    union idas_di_state state;
+    uint8_t sysbtn;
+    HRESULT hr;
+
+    assert(sysbtn_out != NULL);
+
+    sysbtn = 0;
+
+    hr = di_dev_poll(idas_di_dev, &state);
+
+    if (FAILED(hr)) {
+        *sysbtn_out = sysbtn;
+
+        return;
+    }
+
+    if (idas_di_coin && state.st.rgbButtons[idas_di_coin - 1]) {
+        sysbtn |= IDAS_IO_SYSBTN_COIN;
+    }
+
+    *sysbtn_out = sysbtn;
 }
 
 static void idas_di_ffb_init(void) {
