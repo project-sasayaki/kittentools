@@ -22,17 +22,38 @@ static float idShiftY = 0.0;
 
 static const IDAS_InitialData* init = NULL;
 
+int hook_drawBalloon(void* this, void* a2, float a3, float a4, float a5, float a6, float a7, bool a8);
 int (__cdecl *next_drawBalloon)(void* this, void* a2, float a3, float a4, float a5, float a6, float a7, bool a8);
+
+int hook_cCreditdisplayTexture(int a1, int a2, uint8_t a3, int a4, int a5);
 int (__cdecl *next_cCreditdisplayTexture)(int a1, int a2, uint8_t a3, int a4, int a5);
+
+double hook_sFont_put(void *this, float a2, float a3, uint16_t a4);
 double (__cdecl *next_sFont_put)(void *this, float a2, float a3, uint16_t a4);
+
+int hook_sFix_put(int a1, int a2, int a3, char *format);
 int (__cdecl *next_sFix_put)(int a1, int a2, int a3, char *format);
+
+int hook_setClipRect(int a1, int *a2);
 int (__cdecl *next_setClipRect)(int a1, int *a2);
+
+int hook_drawtext(void *this, void *a2, float a3, float a4);
 int (__cdecl *next_drawtext)(void *this, void *a2, float a3, float a4);
+
 void *(__cdecl *next_CreateFrameBuffer)(
     void *renderer, uint32_t width, uint32_t height,
     uint32_t multiSample, uint32_t multiSampleQuality,
     uint32_t colorFormat, uint32_t depthBits, uint32_t stencilBits,
     uint32_t createDepth, void *colorTexture, void *depthTexture);
+
+void *hook_CreateFrameBuffer(
+    void *renderer, uint32_t width, uint32_t height,
+    uint32_t multiSample, uint32_t multiSampleQuality,
+    uint32_t colorFormat, uint32_t depthBits, uint32_t stencilBits,
+    uint32_t createDepth, void *colorTexture, void *depthTexture);
+
+int amDongleUserInfoEx(int a, int b, char *_arcadeContext);
+int amDipswGetData(uint8_t *dip);
 
 typedef void (*sWinProc_MakeWindow_t)(void);
 static sWinProc_MakeWindow_t next_MakeWindow = NULL;

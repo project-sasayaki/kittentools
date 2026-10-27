@@ -23,13 +23,6 @@ static const netFunc idas_net_func = {
     .sendto             = idas_sendto,
 };
 
-int (__cdecl *next_amOsinfoGetNetworkProperty)(DWORD *a1);
-
-int hook_amOsinfoGetNetworkProperty(DWORD *a1)
-{
-    return 0;
-}
-
 static void overrideSubnet(uintptr_t addr)
 {
     if(!addr) return;
