@@ -30,8 +30,8 @@ struct idas_di_axis {
 };
 
 union idas_di_state {
-    DIJOYSTATE st;
-    uint8_t bytes[sizeof(DIJOYSTATE)];
+    DIJOYSTATE2 st;
+    uint8_t bytes[sizeof(DIJOYSTATE2)];
 };
 
 static const struct idas_di_axis idas_di_axes[] = {
@@ -302,55 +302,55 @@ HRESULT idas_di_config_apply()
         return E_INVALIDARG;
     }
 
-    if (Config.dinput.start > 32) {
+    if (Config.dinput.start > 128) {
         log_error(plfBoot, "Wheel: Invalid start button: %i", Config.dinput.start);
 
         return E_INVALIDARG;
     }
 
-    if (Config.dinput.viewChg > 32) {
+    if (Config.dinput.viewChg > 128) {
         log_error(plfBoot, "Wheel: Invalid view change button: %i", Config.dinput.viewChg);
 
         return E_INVALIDARG;
     }
 
-    if (Config.dinput.shiftDn > 32) {
+    if (Config.dinput.shiftDn > 128) {
         log_error(plfBoot, "Wheel: Invalid shift down button: %i", Config.dinput.shiftDn);
 
         return E_INVALIDARG;
     }
 
-    if (Config.dinput.shiftUp > 32) {
+    if (Config.dinput.shiftUp > 128) {
         log_error(plfBoot, "Wheel: Invalid shift up button: %i", Config.dinput.shiftUp);
 
         return E_INVALIDARG;
     }
 
-    if (Config.dinput.up > 32) {
+    if (Config.dinput.up > 128) {
         log_error(plfBoot, "Wheel: Invalid up button: %i", Config.dinput.up);
 
         return E_INVALIDARG;
     }
 
-    if (Config.dinput.down > 32) {
+    if (Config.dinput.down > 128) {
         log_error(plfBoot, "Wheel: Invalid down button: %i", Config.dinput.down);
 
         return E_INVALIDARG;
     }
 
-    if (Config.dinput.left > 32) {
+    if (Config.dinput.left > 128) {
         log_error(plfBoot, "Wheel: Invalid left button: %i", Config.dinput.left);
 
         return E_INVALIDARG;
     }
 
-    if (Config.dinput.right > 32) {
+    if (Config.dinput.right > 128) {
         log_error(plfBoot, "Wheel: Invalid right button: %i", Config.dinput.right);
 
         return E_INVALIDARG;
     }
 
-    if (Config.dinput.coin > 32) {
+    if (Config.dinput.coin > 128) {
         log_error(plfBoot, "Wheel: Invalid coin button: %i", Config.dinput.coin);
 
         return E_INVALIDARG;
@@ -443,7 +443,7 @@ HRESULT idas_di_dev_start(IDirectInputDevice8A *dev) {
         return hr;
     }
 
-    hr = IDirectInputDevice8_SetDataFormat(dev, &c_dfDIJoystick);
+    hr = IDirectInputDevice8_SetDataFormat(dev, &c_dfDIJoystick2);
 
     if (FAILED(hr)) {
         log_error(plfBoot, "DirectInput: SetDataFormat failed: %08x", (int)hr);
