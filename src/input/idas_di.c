@@ -428,6 +428,7 @@ HRESULT idas_di_config_apply()
 }
 
 HRESULT idas_di_dev_start(IDirectInputDevice8A *dev) {
+    bool exclusive = true;
     HRESULT hr;
 
     assert(dev != NULL);
@@ -436,11 +437,23 @@ HRESULT idas_di_dev_start(IDirectInputDevice8A *dev) {
     hr = IDirectInputDevice8_SetCooperativeLevel(
         dev,
         idas_di_wnd,
-        DISCL_BACKGROUND | DISCL_NONEXCLUSIVE);
+        DISCL_BACKGROUND | DISCL_EXCLUSIVE);
 
     if (FAILED(hr)) {
-        log_error(plfBoot, "DirectInput: SetCooperativeLevel failed: %08x", (int)hr);
-        return hr;
+        log_error(plfBoot, "DirectInput: SetCooperativeLevel exclusive failed: %08x", (int)hr);
+
+        hr = IDirectInputDevice8_SetCooperativeLevel(
+            dev,
+            idas_di_wnd,
+            DISCL_BACKGROUND | DISCL_NONEXCLUSIVE);
+
+        if (FAILED(hr)) {
+            log_error(plfBoot, "DirectInput: SetCooperativeLevel non-exclusive failed: %08x", (int)hr);
+            return hr;
+        }
+
+        exclusive = false;
+        log_info(plfBoot, "DirectInput: Using non-exclusive mode; force feedback may be unavailable");
     }
 
     hr = IDirectInputDevice8_SetDataFormat(dev, &c_dfDIJoystick2);
@@ -450,6 +463,19 @@ HRESULT idas_di_dev_start(IDirectInputDevice8A *dev) {
         return hr;
     }
     hr = IDirectInputDevice8_Acquire(dev);
+
+    if (FAILED(hr) && exclusive) {
+        log_warn(plfBoot, "DirectInput: Exclusive Acquire failed: %08x", (int)hr);
+
+        hr = IDirectInputDevice8_SetCooperativeLevel(
+            dev,
+            idas_di_wnd,
+            DISCL_BACKGROUND | DISCL_NONEXCLUSIVE);
+
+        if (SUCCEEDED(hr)) {
+            hr = IDirectInputDevice8_Acquire(dev);
+        }
+    }
 
     if (FAILED(hr)) {
         log_error(plfBoot, "DirectInput: Acquire failed: %08x", (int)hr);
@@ -750,7 +776,7 @@ static void idas_di_ffb_toggle(bool active) {
 
 static void idas_di_ffb_constant_force(uint8_t direction_ffb, uint8_t force) {
     /* DI expects a magnitude in the range of -10.000 to 10.000 */
-    uint16_t ffb_strength = Config.ffb.constantForceStrength;
+    uint16_t ffb_strength = Config.ffb.constantForceStrength * 100;
     if (ffb_strength == 0) {
         return;
     }
@@ -800,7 +826,7 @@ static void idas_di_ffb_constant_force(uint8_t direction_ffb, uint8_t force) {
 
 static void idas_di_ffb_rumble(uint8_t force, uint8_t period) {
     /* DI expects a magnitude in the range of -10.000 to 10.000 */
-    uint16_t ffb_strength = Config.ffb.rumbleStrength;
+    uint16_t ffb_strength = Config.ffb.rumbleStrength * 100;
     if (ffb_strength == 0) {
         return;
     }
@@ -843,7 +869,7 @@ static void idas_di_ffb_damper(uint8_t force) {
     uint32_t ffb_base_damper = Config.ffb.baseDamperStrength;
     uint32_t ffb_deadband = Config.ffb.deadBand;
     /* DI expects a coefficient in the range of -10.000 to 10.000 */
-    uint16_t ffb_strength = Config.ffb.damperStrength;
+    uint16_t ffb_strength = Config.ffb.damperStrength * 100;
     if (ffb_strength == 0) {
         if (idas_di_fx_spring) {
             IDirectInputEffect_Stop(idas_di_fx_spring);
@@ -925,6 +951,7 @@ static void update_or_create_effect(LPDIRECTINPUTEFFECT* effect_ptr, REFGUID gui
         if (SUCCEEDED(hr)) {
             return;
         } else {
+            log_error(plfFFB, "DirectInput: SetParameters failed, recreating effect: %08x", (int)hr);
             IDirectInputEffect_Stop(*effect_ptr);
             IDirectInputEffect_Release(*effect_ptr);
             *effect_ptr = NULL;
@@ -934,11 +961,13 @@ static void update_or_create_effect(LPDIRECTINPUTEFFECT* effect_ptr, REFGUID gui
     IDirectInputEffect* obj = NULL;
     hr = IDirectInputDevice8_CreateEffect(idas_di_dev, guid, fx, &obj, NULL);
     if (FAILED(hr)) {
+        log_error(plfFFB, "DirectInput: CreateEffect failed: %08x", (int)hr);
         return;
     }
 
     hr = IDirectInputEffect_Start(obj, fx->dwDuration, 0);
     if (FAILED(hr)) {
+        log_error(plfFFB, "DirectInput: Effect start failed: %08x", (int)hr);
         IDirectInputEffect_Release(obj);
         return;
     }
