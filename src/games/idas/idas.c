@@ -157,6 +157,56 @@ int hook_drawtext(void *this, void *a2, float a3, float a4)
     return next_drawtext(this, a2, a3 + idShiftX, a4 + idShiftY);
 }
 
+uint32_t hook_raceOnStartReady(void *race);
+uint32_t (__cdecl *next_raceOnStartReady)(void *race);
+static void (__cdecl *acroObjectRestart)(void *acro);
+static void (__cdecl *acroManagerAddExecHandle)(void *manager, int32_t handle);
+static uint8_t ***acroManager;
+
+static bool acroEffectIsExecuted(int32_t handle)
+{
+    uint8_t **head = *acroManager;
+    if (!head || handle < 0)
+        return true;
+    for (uint8_t **node = (uint8_t **)head[0]; node && node != head; node = (uint8_t **)node[0])
+        if (*(int32_t *)((uint8_t *)node + 8) == handle)
+            return true;
+    return false;
+}
+
+// Time attack retries reuse cRace, so restore the start countdown before each start.
+uint32_t hook_raceOnStartReady(void *race)
+{
+    uint32_t result = next_raceOnStartReady(race);
+    int32_t *shownAt = (int32_t *)((uint8_t *)race + 0x2a4);
+    uint8_t *acro = *(uint8_t **)((uint8_t *)race + 0x294);
+    if (acro)
+    {
+        int32_t handle = *(int32_t *)(acro + 0x17c);
+        if (!acroEffectIsExecuted(handle))
+            acroManagerAddExecHandle(*acroManager, handle);
+        if (*shownAt > 0)
+        {
+            acroObjectRestart(acro);
+            acro[0x185] = 0;
+            acro[0x184] = 0;
+        }
+    }
+    *shownAt = -1;
+    return result;
+}
+
+static void installCountdownFix(void)
+{
+    void *onStartReady = get_native_symbol_ptr("_ZN5cRace12onStartReadyEv");
+    acroObjectRestart = get_native_symbol_ptr("_ZN11cAcroObject7RestartEv");
+    acroManagerAddExecHandle = get_native_symbol_ptr("_ZN12cAcroManager13addExecHandleEl");
+    acroManager = get_variable_symbol_ptr("_ZN12cAcroManager14g_pAcroManagerE");
+    if (!onStartReady || !acroObjectRestart || !acroManagerAddExecHandle || !acroManager)
+        return;
+    MH_CreateHook(onStartReady, hook_raceOnStartReady, (void**)&next_raceOnStartReady);
+}
+
 void __attribute__((regparm(3))) hook_sGLH_GET_EXTPROC_notype(void** param_1, const char* param_2, bool param_3)
 {
     next_sGLH_GET_EXTPROC_notype(param_1, param_2, param_3);
@@ -238,6 +288,9 @@ void init_idas_prepatch(uint32_t crc)
         setVariable(init->resolutionPatch.MaxHeightAddr.addr, 1);
         setVariable(init->resolutionPatch.targetWidthAddr.addr, Config.display.width);
         setVariable(init->resolutionPatch.targetHeightAddr.addr, Config.display.height);
+
+        if (!strcmp(init->gameID, "SBQZ") || !strcmp(init->gameID, "SBTS"))
+            installCountdownFix();
     }
 
     MH_CreateHook((LPVOID)get_native_symbol_ptr("_ZN2es23sGLH_GET_EXTPROC_notypeEPPvPKcb"), hook_sGLH_GET_EXTPROC_notype, (void**)&next_sGLH_GET_EXTPROC_notype);
