@@ -451,8 +451,28 @@ static void idas_xi_jvs_read_analogs(struct idas_io_analog_state *out)
 }
 
 
+static volatile LONG idas_xi_ffb_closed;
+
+static void idas_xi_ffb_release(void)
+{
+    XINPUT_VIBRATION vibration;
+
+    if (InterlockedExchange(&idas_xi_ffb_closed, 1))
+        return;
+    memset(&vibration, 0, sizeof(vibration));
+    XInputSetState(idas_xi_device_index, &vibration);
+}
+
+static BOOL WINAPI idas_xi_console_ctrl(DWORD type)
+{
+    (void)type;
+    idas_xi_ffb_release();
+    return FALSE;
+}
+
 static void idas_xi_ffb_init(void) {
-    return;
+    atexit(idas_xi_ffb_release);
+    SetConsoleCtrlHandler(idas_xi_console_ctrl, TRUE);
 }
 
 static void idas_xi_ffb_toggle(bool active) {
@@ -469,6 +489,9 @@ static void idas_xi_ffb_constant_force(uint8_t direction, uint8_t force) {
 
 static void idas_xi_ffb_rumble(uint8_t period, uint8_t force) {
     XINPUT_VIBRATION vibration;
+
+    if (idas_xi_ffb_closed)
+        return;
     uint16_t strength = force * 516 * (Config.ffb.rumbleStrength / 100.0f);
 
     memset(&vibration, 0, sizeof(vibration));

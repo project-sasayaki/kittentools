@@ -18,6 +18,7 @@
 #include "elfLoader/termios.h"
 #include "elfLoader/network.h"
 #include "elfLoader/math.h"
+#include "elfLoader/libcExtra.h"
 #include "elfLoader/symbol.h"
 #include "elfLoader/pthread/pthreadEmu.h"
 #include "log/log.h"
@@ -180,6 +181,17 @@ LONG CALLBACK myVectoredHandler(PEXCEPTION_POINTERS ExceptionInfo)
 
     fprintf(stderr, "\n*** CRASH: %s (0x%08lX) at EIP=0x%08lX ***\n",
             exceptionName(exceptionCode), exceptionCode, ctx->Eip);
+
+    fprintf(stderr, "    EAX=%08lX EBX=%08lX ECX=%08lX EDX=%08lX ESI=%08lX EDI=%08lX ESP=%08lX EBP=%08lX\n",
+            ctx->Eax, ctx->Ebx, ctx->Ecx, ctx->Edx, ctx->Esi, ctx->Edi, ctx->Esp, ctx->Ebp);
+    uint32_t *frame = (uint32_t *)ctx->Ebp;
+    for (int depth = 0; depth < 16 && frame && !IsBadReadPtr(frame, 8); ++depth)
+    {
+        fprintf(stderr, "    #%d return 0x%08X\n", depth, frame[1]);
+        if ((uint32_t *)frame[0] <= frame)
+            break;
+        frame = (uint32_t *)frame[0];
+    }
     printStackTrace(ctx);
     return EXCEPTION_CONTINUE_SEARCH;
 }
@@ -197,6 +209,7 @@ void initBridges()
     ipcBridge_initBridges();
     segaapiBridge_initBridges();
     mathBridge_initBridges();
+    libcExtraBridge_initBridges();
 }
 
 int main(int argc, char *argv[], char *envp[])
@@ -265,6 +278,9 @@ int main(int argc, char *argv[], char *envp[])
     char *final_argv_arr[10];
 
     final_argv_arr[final_argc++] = elfPath;
+
+    if (strlen(elfArgs) == 0 && KittenGuestArgument())
+        snprintf(elfArgs, sizeof(elfArgs), "%s", KittenGuestArgument());
 
     if (strlen(elfArgs) > 0)
     {

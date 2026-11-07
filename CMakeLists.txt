@@ -91,8 +91,10 @@ file(GLOB SRC_FILES
     src/main.c
     src/games/*.c
     src/games/idas/*.c
+    src/games/wmmt3/*.c
     src/cmd.c
     src/audio/*.c
+    src/audio/openal/*.c
     src/config/*.c
     src/graphics/*.c
     src/hooks/*.c
@@ -127,14 +129,16 @@ target_compile_options(${PROJECT_NAME} PRIVATE
     -Wstrict-aliasing=0
 )
 
-# Increase stack size to 4MB to prevent stack overflow on startup
+# 4MB stack, fully committed: Linux guest code never probes the stack, so a
+# frame larger than a page (WMMT3 v337 clV337Card::apply1 is ~35KB) would jump
+# past the guard page and kill the process without any exception reaching us.
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     # Debug build: emit debug symbols, disable LTO/strip and optimization so the
     # binary is directly debuggable with gdb.
     target_compile_options(${PROJECT_NAME} PRIVATE -g -O0)
     target_link_options(${PROJECT_NAME} PRIVATE
         -static
-        -Wl,--stack,4194304
+        -Xlinker --stack -Xlinker 4194304,4194304
         -Wl,--large-address-aware
     )
 else()
@@ -142,7 +146,7 @@ else()
         -static
         -flto=auto
         -s
-        -Wl,--stack,4194304
+        -Xlinker --stack -Xlinker 4194304,4194304
         -Wl,--large-address-aware
     )
 endif()
@@ -150,4 +154,4 @@ endif()
 target_link_directories(${PROJECT_NAME} PRIVATE "libs")
 
 # Link dependencies
-target_link_libraries(${PROJECT_NAME} minhook -static-libgcc -static-libstdc++ xaudio2_9 xapofx gdi32 winmm ole32 ws2_32 opengl32 glu32 pthread psapi xinput dinput8 dxgi dxguid inih iphlpapi mfplat mf mfreadwrite propsys uuid gnurx tre intl iconv dbghelp imm32)
+target_link_libraries(${PROJECT_NAME} minhook -static-libgcc -static-libstdc++ xaudio2_9 xapofx gdi32 winmm ole32 ws2_32 opengl32 glu32 pthread psapi xinput dinput8 dxgi dxguid inih iphlpapi mfplat mf mfreadwrite propsys uuid gnurx tre intl iconv dbghelp imm32 gdiplus)

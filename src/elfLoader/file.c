@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdarg.h>
 #include <io.h>
+#include <fcntl.h>
 #include <direct.h>
 #include <windows.h>
 #include "../hooks/file.h"
@@ -31,6 +32,19 @@ int hook_fxstat(int ver, int fd, struct linux_stat *buf);
 int hook_fxstat64(int ver, int fd, struct linux_stat64 *buf);
 int hook_xmknod(int ver, const char *path, unsigned int mode, void *dev);
 int hook_fcntl(int fd, int cmd, ...);
+
+struct linux_statvfs64;
+int hook_xstat64(int ver, const char *path, void *buf);
+struct linux_dirent64 *hook_readdir64(void *dirp);
+int hook_readdir64_r(void *dirp, struct linux_dirent64 *entry, struct linux_dirent64 **result);
+int hook_statvfs64(const char *path, struct linux_statvfs64 *buf);
+int hook_ftruncate(int fd, long length);
+int hook_rename(const char *oldPath, const char *newPath);
+int hook_chdir(const char *path);
+int hook_link(const char *oldPath, const char *newPath);
+long hook_pathconf(const char *path, int name);
+int hook_pipe(int fds[2]);
+static int myStatImpl(const char *path, void *buf, bool use_stat64);
 
 
 void filesystemBridge_initBridges(void)
@@ -65,7 +79,7 @@ void filesystemBridge_initBridges(void)
     symbol_register("write", hook_write, NULL);
     symbol_register("close", hook_close, NULL);
     symbol_register("open", hook_open, NULL);
-    symbol_register("fdopen", fdopen, NULL);
+    symbol_register("fdopen", hook_fdopen, NULL);
     symbol_register("setvbuf", setvbuf, NULL);
     symbol_register("writev", hook_writev, NULL);
 
@@ -86,6 +100,143 @@ void filesystemBridge_initBridges(void)
     symbol_register("__fxstat64", hook_fxstat64, NULL);
     symbol_register("__xmknod", hook_xmknod, NULL);
     symbol_register("fcntl", hook_fcntl, NULL);
+
+    symbol_register("open64", hook_open64, NULL);
+    symbol_register("lseek", _lseek, NULL);
+    symbol_register("__xstat64", hook_xstat64, NULL);
+    symbol_register("__lxstat64", hook_xstat64, NULL);
+    symbol_register("readdir64", hook_readdir64, NULL);
+    symbol_register("readdir64_r", hook_readdir64_r, NULL);
+    symbol_register("statvfs64", hook_statvfs64, NULL);
+    symbol_register("ftruncate", hook_ftruncate, NULL);
+    symbol_register("rename", hook_rename, NULL);
+    symbol_register("chdir", hook_chdir, NULL);
+    symbol_register("chmod", hook_ret_zero, NULL);
+    symbol_register("chown", hook_ret_zero, NULL);
+    symbol_register("link", hook_link, NULL);
+    symbol_register("symlink", hook_link, NULL);
+    symbol_register("pathconf", hook_pathconf, NULL);
+    symbol_register("dup", _dup, NULL);
+    symbol_register("pipe", hook_pipe, NULL);
+}
+
+int hook_xstat64(int ver, const char *path, void *buf)
+{
+    (void)ver;
+    return myStatImpl(path, buf, true);
+}
+
+struct linux_dirent64 *hook_readdir64(void *dirp)
+{
+    struct linux_dirent *ent = hook_readdir(dirp);
+    if (!ent)
+        return NULL;
+
+    DIR_Impl *dir = (DIR_Impl *)dirp;
+    memset(&dir->ent64, 0, sizeof(dir->ent64));
+    dir->ent64.d_ino = 1;
+    dir->ent64.d_type = ent->d_type;
+    strncpy(dir->ent64.d_name, ent->d_name, sizeof(dir->ent64.d_name) - 1);
+    dir->ent64.d_reclen = (unsigned short)sizeof(dir->ent64);
+    return &dir->ent64;
+}
+
+int hook_readdir64_r(void *dirp, struct linux_dirent64 *entry, struct linux_dirent64 **result)
+{
+    struct linux_dirent64 *ent = hook_readdir64(dirp);
+    if (ent && entry)
+    {
+        memcpy(entry, ent, sizeof(*entry));
+        *result = entry;
+    }
+    else
+    {
+        *result = NULL;
+    }
+    return 0;
+}
+
+struct linux_statvfs64
+{
+    uint32_t f_bsize;
+    uint32_t f_frsize;
+    uint64_t f_blocks;
+    uint64_t f_bfree;
+    uint64_t f_bavail;
+    uint64_t f_files;
+    uint64_t f_ffree;
+    uint64_t f_favail;
+    uint32_t f_fsid;
+    int32_t __f_unused;
+    uint32_t f_flag;
+    uint32_t f_namemax;
+    int32_t __f_spare[6];
+};
+
+int hook_statvfs64(const char *path, struct linux_statvfs64 *buf)
+{
+    (void)path;
+    if (!buf)
+        return -1;
+
+    ULARGE_INTEGER freeToCaller, total, totalFree;
+    memset(buf, 0, sizeof(*buf));
+    buf->f_bsize = 4096;
+    buf->f_frsize = 4096;
+    buf->f_namemax = 255;
+    if (GetDiskFreeSpaceExA(NULL, &freeToCaller, &total, &totalFree))
+    {
+        buf->f_blocks = total.QuadPart / 4096;
+        buf->f_bfree = totalFree.QuadPart / 4096;
+        buf->f_bavail = freeToCaller.QuadPart / 4096;
+    }
+    buf->f_files = buf->f_ffree = buf->f_favail = 0x100000;
+    return 0;
+}
+
+int hook_ftruncate(int fd, long length)
+{
+    return _chsize(fd, length);
+}
+
+int hook_rename(const char *oldPath, const char *newPath)
+{
+    char oldBuffer[KITTEN_PATH_MAX], newBuffer[KITTEN_PATH_MAX];
+    oldPath = mapGuestTmpPath(oldPath, oldBuffer);
+    newPath = mapGuestTmpPath(newPath, newBuffer);
+    /* POSIX rename replaces an existing target. */
+    return MoveFileExA(oldPath, newPath, MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED) ? 0 : -1;
+}
+
+int hook_chdir(const char *path)
+{
+    char buffer[KITTEN_PATH_MAX];
+    return _chdir(mapGuestTmpPath(path, buffer));
+}
+
+int hook_link(const char *oldPath, const char *newPath)
+{
+    char oldBuffer[KITTEN_PATH_MAX], newBuffer[KITTEN_PATH_MAX];
+    return CopyFileA(mapGuestTmpPath(oldPath, oldBuffer), mapGuestTmpPath(newPath, newBuffer), TRUE) ? 0 : -1;
+}
+
+long hook_pathconf(const char *path, int name)
+{
+    (void)path;
+    switch (name)
+    {
+        case 3:  /* _PC_NAME_MAX */
+            return 255;
+        case 4:  /* _PC_PATH_MAX */
+            return 4096;
+        default:
+            return -1;
+    }
+}
+
+int hook_pipe(int fds[2])
+{
+    return _pipe(fds, 4096, _O_BINARY);
 }
 
 size_t hook_fwrite(const void *ptr, size_t size, size_t count, FILE *stream)
@@ -422,8 +573,23 @@ int hook_xmknod(int ver, const char *path, unsigned int mode, void *dev)
     return 0;
 }
 
+static bool g_stdinNonBlocking;
+
+bool file_stdin_is_nonblocking(void)
+{
+    return g_stdinNonBlocking;
+}
+
 int hook_fcntl(int fd, int cmd, ...)
 {
+    if (fd == 0 && cmd == 4 /* F_SETFL */)
+    {
+        va_list args;
+        va_start(args, cmd);
+        long flags = va_arg(args, long);
+        va_end(args);
+        g_stdinNonBlocking = (flags & 0x800 /* O_NONBLOCK */) != 0;
+    }
     return 0;
 }
 

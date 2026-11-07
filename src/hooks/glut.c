@@ -70,7 +70,9 @@ void hook_GlutSwapBuffers(void)
     msOnSwap();               /* resolve the sink FBO if the engine presented it dirty */
     HDC hdc = GetDC(g_Window);
     fpsLimiter();
+    frameTimeLog_beforeSwap();
     SwapBuffers(hdc);
+    frameTimeLog_afterSwap();
     ReleaseDC(g_Window, hdc);
 }
 

@@ -2,6 +2,7 @@
 #include <dirent.h>
 #include <libgen.h>
 #include <stdio.h>
+#include <io.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <stdarg.h>
@@ -15,6 +16,9 @@
 #include "file.h"
 #include "network.h"
 #include "../devices/device.h"
+
+static const char *redirected_path(const char *pathname);
+static const FileObserver *g_observer;
 
 #define REAL_FUNC(name) name
 #define HOOK_FILE_NAME "NUL"
@@ -70,6 +74,16 @@ static int LinuxFlagsToWindowsFlags(int flags)
         winFlags |= 0x0008;
 
     return winFlags;
+}
+
+const char *mapGuestTmpPath(const char *path, char buffer[KITTEN_PATH_MAX])
+{
+    if (path && (strncmp(path, "/tmp/", 5) == 0 || strncmp(path, "/var/tmp/", 9) == 0))
+    {
+        getKittenPath(path, buffer);
+        return buffer;
+    }
+    return path;
 }
 
 void getKittenPath(const char *originalPath, char *targetPath)
@@ -158,22 +172,51 @@ int hook_open(const char *pathname, int flags, ...)
 
     flags = LinuxFlagsToWindowsFlags(flags);
 
+    const char *redirect = redirected_path(pathname);
+    if (redirect)
+        path = (char *)redirect;
+
     if (strncmp(pathname, "/tmp/", 5) == 0)
     {
         getKittenPath(pathname, winPath);
         path = winPath;
     }
     
-    if (mode)
-        return _open(path, flags, mode);
-    return _open(path, flags);
+    int opened = mode ? _open(path, flags, mode) : _open(path, flags);
+    if (g_observer && opened >= 0)
+        g_observer->opened(pathname, opened, NULL);
+    return opened;
 }
 
 int hook_close(int fd)
 {
     int (*_close)(int fd) = REAL_FUNC(close);
 
+    /* Or a reused descriptor would be routed to the board. */
+    DeviceDescriptor *device = getDevice(fd);
+    if (device)
+    {
+        if (device->close)
+            device->close(fd);
+        device->fd = -1;
+    }
+    else if (g_observer)
+        g_observer->closed(fd, NULL);
+
     return _close(fd);
+}
+
+static bool g_linuxBinaryFiles = false;
+
+/* Linux has no text mode; 0x1A would end a text-mode read. */
+static const char *stream_mode(const char *mode, char buffer[16])
+{
+    if (g_linuxBinaryFiles && mode && !strchr(mode, 'b') && strlen(mode) + 2 <= 16)
+    {
+        snprintf(buffer, 16, "%sb", mode);
+        return buffer;
+    }
+    return mode;
 }
 
 int hook_open64(const char *pathname, int flags, ...)
@@ -189,7 +232,7 @@ int hook_open64(const char *pathname, int flags, ...)
 FILE *hook_fopen(const char *restrict pathname, const char *restrict mode)
 {
     void *address = __builtin_return_address(0);
-    char newPath[MAX_PATH];
+    char newPath[KITTEN_PATH_MAX];
     char *path = (char *)pathname;
     uint8_t gpu_id = getGPUVendorID();
     FILE *(*_fopen)(const char *restrict pathname, const char *restrict mode) = REAL_FUNC(fopen);
@@ -217,14 +260,56 @@ FILE *hook_fopen(const char *restrict pathname, const char *restrict mode)
 
     }
     
-    if (strncmp(pathname, "/tmp/", 5) == 0 || strncmp(pathname, "/var/tmp/", 9) == 0)
-    {
-        getKittenPath(pathname, newPath);
-        path = newPath;
-    }
+    path = (char *)mapGuestTmpPath(pathname, newPath);
+    const char *redirect = redirected_path(pathname);
+    if (redirect)
+        path = (char *)redirect;
+
+    char binaryMode[16];
+    mode = stream_mode(mode, binaryMode);
 
     log_debug(plfHooks, "fopen: %s (as %s) with mode %s at %p", pathname, path, mode, address);
-    return _fopen(path, mode);
+    FILE *stream = _fopen(path, mode);
+    if (g_observer && stream)
+        g_observer->opened(pathname, -1, stream);
+    return stream;
+}
+
+FILE *hook_fdopen(int fd, const char *mode)
+{
+    char binaryMode[16];
+    return fdopen(fd, stream_mode(mode, binaryMode));
+}
+
+#define MAX_PATH_REDIRECTS 8
+static struct { char guest[128]; char host[MAX_PATH]; } g_pathRedirects[MAX_PATH_REDIRECTS];
+static int g_pathRedirectCount;
+
+void file_set_observer(const FileObserver *observer)
+{
+    g_observer = observer;
+}
+
+void file_redirect_path(const char *guestPath, const char *hostPath)
+{
+    if (g_pathRedirectCount >= MAX_PATH_REDIRECTS)
+        return;
+    snprintf(g_pathRedirects[g_pathRedirectCount].guest, sizeof(g_pathRedirects[0].guest), "%s", guestPath);
+    snprintf(g_pathRedirects[g_pathRedirectCount].host, sizeof(g_pathRedirects[0].host), "%s", hostPath);
+    g_pathRedirectCount++;
+}
+
+static const char *redirected_path(const char *pathname)
+{
+    for (int i = 0; i < g_pathRedirectCount; i++)
+        if (pathname && strcmp(pathname, g_pathRedirects[i].guest) == 0)
+            return g_pathRedirects[i].host;
+    return NULL;
+}
+
+void file_use_linux_binary_semantics(bool enable)
+{
+    g_linuxBinaryFiles = enable;
 }
 
 FILE *hook_fopen64(const char *pathname, const char *mode)
@@ -236,6 +321,8 @@ FILE *hook_fopen64(const char *pathname, const char *mode)
 int hook_fclose(FILE *stream)
 {
     int (*_fclose)(FILE *stream) = REAL_FUNC(fclose);
+    if (g_observer && stream)
+        g_observer->closed(-1, stream);
     return _fclose(stream);
 }
 
@@ -254,14 +341,26 @@ ssize_t hook_read(int fd, void *buf, size_t count)
     if (device && device->read)
         return device->read(fd, buf, count);
 
-    return _read(fd, buf, count);
+    if (!g_observer)
+        return _read(fd, buf, count);
+    long long offset = _lseeki64(fd, 0, SEEK_CUR);
+    int got = _read(fd, buf, count);
+    if (got > 0)
+        g_observer->read(fd, NULL, offset, (size_t)got);
+    return got;
 }
 
 size_t hook_fread(void *buf, size_t size, size_t count, FILE *stream)
 {
     size_t (*_fread)(void *buf, size_t size, size_t count, FILE *stream) = REAL_FUNC(fread);
 
-    return _fread(buf, size, count, stream);
+    if (!g_observer)
+        return _fread(buf, size, count, stream);
+    long long offset = _ftelli64(stream);
+    size_t got = _fread(buf, size, count, stream);
+    if (got > 0)
+        g_observer->read(-1, stream, offset, got * size);
+    return got;
 }
 
 long int hook_ftell(FILE *stream)

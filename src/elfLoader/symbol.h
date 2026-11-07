@@ -19,3 +19,8 @@ void *symres_get_vtable(const char *className);
 void symres_load_needed_library(const char *linuxName);
 void *hook_resolve_symbol(const char *symbolName);
 void hook_load_needed_library(const char *filename);
+
+bool symres_is_library_registered(const char *linuxName);
+
+void symres_enable_guest_runtime(void);
+void symres_register_guest_eh_frame(void *ehFrameBegin, void *dataBase);

@@ -2,6 +2,7 @@
 
 #include <stdio.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include <time.h>
 #include <wchar.h>
 #include <sys/types.h>
@@ -38,3 +39,11 @@ struct linux_sigaction
 };
 
 void libcBridge_initBridges(void);
+
+typedef int (*SystemCommandHandler)(const char *command);
+void libc_set_system_handler(SystemCommandHandler handler);
+
+/* WMMT3: local wall time served as UTC. */
+void libc_use_local_time_as_utc(bool on);
+
+int32_t libc_wall_clock_offset(void);

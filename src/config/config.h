@@ -38,7 +38,8 @@ typedef enum
 typedef enum
 {
     SEGA_TYPE_1,
-    SEGA_TYPE_3
+    SEGA_TYPE_3,
+    NAMCO_FCA1
 } JVSIOType;
 
 typedef struct config {

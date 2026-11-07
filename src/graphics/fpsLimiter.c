@@ -1,3 +1,5 @@
+#include <stdio.h>
+#include <stdlib.h>
 #include <sys/time.h>
 #include <unistd.h>
 #include "../graphics/fpsLimiter.h"
@@ -24,10 +26,19 @@ void initFpsLimiter(int _fpsNum, int _fpsDen, bool busyWait)
     g_bBusyWait = g_bBusyWait;
 }
 
+static int g_ftState;
+static LONGLONG g_ftLimitStart, g_ftLimitEnd;
+
 void fpsLimiter()
 {
     LARGE_INTEGER now;
     LONGLONG target_qpc;
+
+    if (g_ftState == 2)
+    {
+        QueryPerformanceCounter(&now);
+        g_ftLimitStart = now.QuadPart;
+    }
 
     target_qpc = g_qpc_start + (g_frame_idx * qpc_per_frame_num) / qpc_per_frame_den;
 
@@ -64,4 +75,66 @@ void fpsLimiter()
     }
 
     g_frame_idx++;
-} 
+
+    if (g_ftState == 2)
+    {
+        QueryPerformanceCounter(&now);
+        g_ftLimitEnd = now.QuadPart;
+    }
+}
+
+static FILE *g_ftFile;
+static LONGLONG g_ftFreq, g_ftStart, g_ftPrev, g_ftCall, g_ftPrevSwapEnd;
+
+static int frame_time_log_enabled(void)
+{
+    if (g_ftState == 0)
+    {
+        const char *path = getenv("KITTEN_FRAMETIME_LOG");
+        g_ftFile = (path && *path) ? fopen(path, "w") : NULL;
+        if (g_ftFile)
+        {
+            LARGE_INTEGER f;
+            QueryPerformanceFrequency(&f);
+            g_ftFreq = f.QuadPart;
+            setvbuf(g_ftFile, NULL, _IOFBF, 1 << 16);
+            fputs("present_us,interval_us,swap_us,work_us,wait_us\n", g_ftFile);
+        }
+        g_ftState = g_ftFile ? 2 : 1;
+    }
+    return g_ftState == 2;
+}
+
+void frameTimeLog_beforeSwap(void)
+{
+    if (!frame_time_log_enabled())
+        return;
+    LARGE_INTEGER now;
+    QueryPerformanceCounter(&now);
+    g_ftCall = now.QuadPart;
+    if (!g_ftStart)
+        g_ftStart = g_ftCall;
+}
+
+void frameTimeLog_afterSwap(void)
+{
+    if (g_ftState != 2)
+        return;
+    LARGE_INTEGER now;
+    QueryPerformanceCounter(&now);
+    LONGLONG interval = g_ftPrev ? g_ftCall - g_ftPrev : 0;
+    LONGLONG work = (g_ftPrevSwapEnd && g_ftLimitStart > g_ftPrevSwapEnd)
+                        ? g_ftLimitStart - g_ftPrevSwapEnd : 0;
+    LONGLONG wait = g_ftLimitEnd > g_ftLimitStart ? g_ftLimitEnd - g_ftLimitStart : 0;
+    fprintf(g_ftFile, "%lld,%lld,%lld,%lld,%lld\n",
+            (g_ftCall - g_ftStart) * 1000000 / g_ftFreq,
+            interval * 1000000 / g_ftFreq,
+            (now.QuadPart - g_ftCall) * 1000000 / g_ftFreq,
+            work * 1000000 / g_ftFreq,
+            wait * 1000000 / g_ftFreq);
+    g_ftPrev = g_ftCall;
+    g_ftPrevSwapEnd = now.QuadPart;
+    static unsigned n;
+    if (++n % 600 == 0)
+        fflush(g_ftFile);
+}

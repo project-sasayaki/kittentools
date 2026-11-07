@@ -235,10 +235,24 @@ int logGeneric(int level, const char *file, int line, PLOG_FACILITY facility, co
     return size;
 }
 
+static UINT g_savedConsoleOutputCP;
+
+static void logRestoreConsoleCP(void)
+{
+    if (g_savedConsoleOutputCP)
+        SetConsoleOutputCP(g_savedConsoleOutputCP);
+}
+
 void logInit(void)
 {
     // Initialize Thread Local Storage for per-thread buffers
     logInitTls();
+    /* Guest log text is UTF-8. */
+    g_savedConsoleOutputCP = GetConsoleOutputCP();
+    if (g_savedConsoleOutputCP && g_savedConsoleOutputCP != CP_UTF8 && SetConsoleOutputCP(CP_UTF8))
+        atexit(logRestoreConsoleCP);
+    else
+        g_savedConsoleOutputCP = 0;
     // Open a sync log file (overwritten each run) for easier post-mortem
     // analysis. ANSI color escapes are stripped on write so it stays plain text.
     fopen_s(&g_logFile, "kitten.log", "w");

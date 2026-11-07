@@ -91,6 +91,24 @@ static FILE *g_stdin = NULL;
 static FILE *g_stdout = NULL;
 static FILE *g_stderr = NULL;
 
+static SystemCommandHandler g_systemHandler = NULL;
+
+void libc_set_system_handler(SystemCommandHandler handler)
+{
+    g_systemHandler = handler;
+}
+
+static int hook_system(const char *command)
+{
+    if (command && g_systemHandler)
+    {
+        int status = g_systemHandler(command);
+        if (status >= 0)
+            return status;
+    }
+    return system(command);
+}
+
 void libcBridge_initBridges(void)
 {
     log_debug(plfBridges, "Initializing Libc Bridges...");
@@ -143,7 +161,7 @@ void libcBridge_initBridges(void)
     symbol_register("__fixunsdfdi", __fixunsdfdi, NULL);
     symbol_register("__fixunssfdi", __fixunssfdi, NULL);
 
-    symbol_register("system", system, NULL);
+    symbol_register("system", hook_system, NULL);
 
     symbol_register("getpid", _getpid, NULL);
     symbol_register("fork", hook_fork, NULL);
@@ -262,9 +280,34 @@ int hook_fscanf(FILE *stream, const char *format, ...)
     return ret;
 }
 
+static bool g_localTimeAsUtc;
+
+void libc_use_local_time_as_utc(bool on)
+{
+    g_localTimeAsUtc = on;
+}
+
+int32_t libc_wall_clock_offset(void)
+{
+    if (!g_localTimeAsUtc)
+        return 0;
+    static volatile LONG offset;
+    static volatile LONG checkedAt;
+    LONG now = (LONG)GetTickCount();
+    if (checkedAt == 0 || (DWORD)(now - checkedAt) >= 60000)
+    {
+        __time64_t utc = _time64(NULL);
+        struct tm local;
+        if (_localtime64_s(&local, &utc) == 0)
+            InterlockedExchange(&offset, (LONG)(_mkgmtime64(&local) - utc));
+        InterlockedExchange(&checkedAt, now ? now : 1);
+    }
+    return (int32_t)offset;
+}
+
 int32_t hook_time(int32_t *tloc)
 {
-    time_t t = time(NULL);
+    time_t t = time(NULL) + libc_wall_clock_offset();
     if (tloc)
     {
         *tloc = (int32_t)t;
@@ -281,7 +324,10 @@ int hook_utime(const char *filename, const struct linux_utimbuf *times)
 
 int hook_gettimeofday(struct timeval *tv, void *tz)
 {
-    return gettimeofday(tv, tz);
+    int result = gettimeofday(tv, tz);
+    if (result == 0 && tv)
+        tv->tv_sec += libc_wall_clock_offset();
+    return result;
 }
 
 int hook_settimeofday(const struct timeval *tv, const void *tz)
@@ -342,7 +388,7 @@ struct tm32 *hook_localtime(const int32_t *timer)
 {
     static struct tm32 t32;
     time_t t = (time_t)*timer;
-    struct tm *tm_ptr = localtime(&t);
+    struct tm *tm_ptr = g_localTimeAsUtc ? gmtime(&t) : localtime(&t);
 
     if (tm_ptr)
     {
@@ -640,6 +686,8 @@ struct tm *hook_localtime_r(const time_t *timep, struct tm *result)
     const int32_t *t32 = (const int32_t *)timep;
     time_t t = (time_t)*t32;
 
+    if (g_localTimeAsUtc)
+        return gmtime_s(result, &t) == 0 ? result : NULL;
     if (localtime_s(result, &t) == 0)
         return result;
     return NULL;

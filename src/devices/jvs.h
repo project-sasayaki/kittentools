@@ -115,12 +115,16 @@ typedef struct
     unsigned char backup;
     unsigned char rightAlignBits;
     char displayName[MAX_JVS_NAME_SIZE];
+    unsigned char generalPurposeInputs;
+    unsigned char analogueOutChannels;
 } JVSCapabilities;
 
 struct io3_switch_state {
     uint8_t system;
     uint16_t p1;
     uint16_t p2;
+    uint8_t p1Extra;
+    uint8_t p2Extra;
 };
 
 typedef struct JVS_OPS {
@@ -171,6 +175,8 @@ typedef enum
 int initJVS(JVSIOType type);
 
 JVSStatus JvsHandle(int* packetSize);
+
+JVSStatus JvsHandleUnescaped(const uint8_t *packet, size_t length, int *packetSize);
 
 /* The in and out packets used to read and write to and from*/
 extern JVSIO io;
