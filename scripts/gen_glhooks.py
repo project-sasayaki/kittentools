@@ -66,6 +66,16 @@ EXCLUDED_GL = {
     "glDeleteTextures",
     "glBindTexture",
     "glScissor",
+    "glBindFramebuffer",
+    "glDrawBuffer",
+    "glReadBuffer",
+    "glReadPixels",
+    "glCopyPixels",
+    "glCopyTexImage1D",
+    "glCopyTexImage2D",
+    "glCopyTexSubImage1D",
+    "glCopyTexSubImage2D",
+    "glCopyTexSubImage3D",
 }
 
 

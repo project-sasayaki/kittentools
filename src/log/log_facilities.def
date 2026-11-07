@@ -16,6 +16,7 @@ _LF(Misc, ELFLoader, "elfloader")
 _LF(Misc, MemMgr, "memm")
 _LF(Misc, SymbolResolv, "symbolresolv")
 _LF(Misc, DebugLog, "DebugLog")
+_LF(Misc, Wmmt3, "wmmt3")
 
 _LF(Hooks, Processes, "processes")
 _LF(Hooks, Registry, "registry")

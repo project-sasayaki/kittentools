@@ -41,7 +41,21 @@ long int hook_ftell(FILE *stream);
 int hook_fseek(FILE *stream, long int offset, int whence);
 void hook_rewind(FILE *stream);
 int hook_ioctl(int fd, unsigned long int request, ...);
+#define KITTEN_PATH_MAX 512
 void getKittenPath(const char *originalPath, char *targetPath);
+const char *mapGuestTmpPath(const char *path, char buffer[KITTEN_PATH_MAX]);
+FILE *hook_fdopen(int fd, const char *mode);
+
+void file_use_linux_binary_semantics(bool enable);
+void file_redirect_path(const char *guestPath, const char *hostPath);
+
+typedef struct
+{
+    void (*opened)(const char *guestPath, int fd, FILE *stream);
+    void (*read)(int fd, FILE *stream, long long offset, size_t bytes);
+    void (*closed)(int fd, FILE *stream);
+} FileObserver;
+void file_set_observer(const FileObserver *observer);
 
 #ifdef __cplusplus
 }

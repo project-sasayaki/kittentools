@@ -24,11 +24,26 @@ struct linux_dirent
     char d_name[260];
 };
 
+/* i386 Linux aligns 64-bit members to 4 bytes, MinGW to 8. */
+#pragma pack(push, 4)
+
+struct linux_dirent64
+{
+    uint64_t d_ino;
+    int64_t d_off;
+    unsigned short d_reclen;
+    unsigned char d_type;
+    char d_name[256];
+};
+
+#pragma pack(pop)
+
 struct DIR_Impl
 {
     HANDLE hFind;
     WIN32_FIND_DATAA findData;
     struct linux_dirent ent;
+    struct linux_dirent64 ent64;
     bool first_read;
     bool finished;
     char path[MAX_PATH];
@@ -60,6 +75,7 @@ struct linux_stat
     unsigned long __unused5;
 };
 
+#pragma pack(push, 4)
 struct linux_stat64
 {
     unsigned long long st_dev;
@@ -131,6 +147,7 @@ struct linux_stat64_safe
     uint32_t st_ctime_nsec;
     uint64_t st_ino;
 };
+#pragma pack(pop)
 
 
 #define LINUX_S_IFMT 0170000
@@ -148,3 +165,5 @@ struct iovec {
 };
 
 void filesystemBridge_initBridges(void);
+
+bool file_stdin_is_nonblocking(void);

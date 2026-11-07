@@ -3,6 +3,8 @@
 #include <ws2tcpip.h>
 #include <windows.h>
 #include <mstcpip.h>
+#include <iphlpapi.h>
+#include <netioapi.h>
 #include <errno.h>
 #include <string.h>
 #include <stdlib.h>
@@ -41,6 +43,14 @@ int hook_Gethostbyaddr_r(const void *addr, int len, int type, void *ret, char *b
                           int *h_errnop);
 struct linux_hostent *hook_Gethostbyname(const char *name);
 struct linux_hostent *hook_Gethostbyaddr(const void *addr, int len, int type);
+struct linux_msghdr;
+struct linux_servent;
+int hook_getsockname(int fd, struct sockaddr *addr, int *addrlen);
+int hook_getpeername(int fd, struct sockaddr *addr, int *addrlen);
+int hook_sendmsg(int fd, const struct linux_msghdr *msg, int flags);
+int hook_recvmsg(int fd, struct linux_msghdr *msg, int flags);
+const char *hook_inet_ntop(int af, const void *src, char *dst, uint32_t size);
+struct linux_servent *hook_getservbyname(const char *name, const char *proto);
 #define LINUX_FD_ZERO(set) do { \
     unsigned int __i; \
     for (__i = 0; __i < (MAX_FD_SIZE / LINUX_NFDBITS); __i++) { \
@@ -387,6 +397,140 @@ void networkBridge_initBridges(void)
     symbol_register("gethostbyname", hook_Gethostbyname, NULL);
     symbol_register("gethostbyaddr", hook_Gethostbyaddr, NULL);
     symbol_register("select", hook_select, NULL);
+
+    symbol_register("getsockname", hook_getsockname, NULL);
+    symbol_register("getpeername", hook_getpeername, NULL);
+    symbol_register("sendmsg", hook_sendmsg, NULL);
+    symbol_register("recvmsg", hook_recvmsg, NULL);
+    symbol_register("inet_ntop", hook_inet_ntop, NULL);
+    symbol_register("getservbyname", hook_getservbyname, NULL);
+    symbol_register("if_nametoindex", if_nametoindex, NULL);
+    symbol_register("if_indextoname", if_indextoname, NULL);
+}
+
+int hook_getsockname(int fd, struct sockaddr *addr, int *addrlen)
+{
+    int ret = getsockname(fd_to_socket(fd), addr, addrlen);
+    if (ret == SOCKET_ERROR)
+        errno = mapWSAErrorToErrno(WSAGetLastError());
+    return ret;
+}
+
+int hook_getpeername(int fd, struct sockaddr *addr, int *addrlen)
+{
+    int ret = getpeername(fd_to_socket(fd), addr, addrlen);
+    if (ret == SOCKET_ERROR)
+        errno = mapWSAErrorToErrno(WSAGetLastError());
+    return ret;
+}
+
+struct linux_iovec
+{
+    void *iov_base;
+    size_t iov_len;
+};
+
+struct linux_msghdr
+{
+    void *msg_name;
+    uint32_t msg_namelen;
+    struct linux_iovec *msg_iov;
+    size_t msg_iovlen;
+    void *msg_control;
+    size_t msg_controllen;
+    int msg_flags;
+};
+
+int hook_sendmsg(int fd, const struct linux_msghdr *msg, int flags)
+{
+    size_t total = 0;
+    for (size_t i = 0; i < msg->msg_iovlen; ++i)
+        total += msg->msg_iov[i].iov_len;
+
+    char *buffer = (char *)malloc(total ? total : 1);
+    if (!buffer)
+    {
+        errno = ENOMEM;
+        return -1;
+    }
+    size_t offset = 0;
+    for (size_t i = 0; i < msg->msg_iovlen; ++i)
+    {
+        memcpy(buffer + offset, msg->msg_iov[i].iov_base, msg->msg_iov[i].iov_len);
+        offset += msg->msg_iov[i].iov_len;
+    }
+
+    int ret = msg->msg_name
+                  ? hook_sendto(fd, buffer, (int)total, flags, (const struct sockaddr *)msg->msg_name, (int)msg->msg_namelen)
+                  : hook_send(fd, buffer, (int)total, flags);
+    free(buffer);
+    return ret;
+}
+
+int hook_recvmsg(int fd, struct linux_msghdr *msg, int flags)
+{
+    size_t total = 0;
+    for (size_t i = 0; i < msg->msg_iovlen; ++i)
+        total += msg->msg_iov[i].iov_len;
+
+    char *buffer = (char *)malloc(total ? total : 1);
+    if (!buffer)
+    {
+        errno = ENOMEM;
+        return -1;
+    }
+
+    int nameLen = (int)msg->msg_namelen;
+    int ret = msg->msg_name
+                  ? hook_recvfrom(fd, buffer, (int)total, flags, (struct sockaddr *)msg->msg_name, &nameLen)
+                  : hook_recv(fd, buffer, (int)total, flags);
+    if (ret > 0)
+    {
+        size_t left = (size_t)ret, offset = 0;
+        for (size_t i = 0; i < msg->msg_iovlen && left; ++i)
+        {
+            size_t chunk = msg->msg_iov[i].iov_len < left ? msg->msg_iov[i].iov_len : left;
+            memcpy(msg->msg_iov[i].iov_base, buffer + offset, chunk);
+            offset += chunk;
+            left -= chunk;
+        }
+        if (msg->msg_name)
+            msg->msg_namelen = (uint32_t)nameLen;
+    }
+    msg->msg_controllen = 0;
+    msg->msg_flags = 0;
+    free(buffer);
+    return ret;
+}
+
+const char *hook_inet_ntop(int af, const void *src, char *dst, uint32_t size)
+{
+    /* Linux AF_INET6 is 10, Winsock's 23. */
+    if (af == 10)
+        af = AF_INET6;
+    return inet_ntop(af, src, dst, size);
+}
+
+/* glibc's servent has an int s_port. */
+struct linux_servent
+{
+    char *s_name;
+    char **s_aliases;
+    int s_port;
+    char *s_proto;
+};
+
+struct linux_servent *hook_getservbyname(const char *name, const char *proto)
+{
+    static struct linux_servent result;
+    struct servent *ent = getservbyname(name, proto);
+    if (!ent)
+        return NULL;
+    result.s_name = ent->s_name;
+    result.s_aliases = ent->s_aliases;
+    result.s_port = (unsigned short)ent->s_port;
+    result.s_proto = ent->s_proto;
+    return &result;
 }
 
 unsigned long hook_inet_addr(const char *cp)

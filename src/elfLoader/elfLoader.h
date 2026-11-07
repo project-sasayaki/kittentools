@@ -15,6 +15,12 @@ typedef struct ElfLoader
     void     *baseAddress;
     void     *imageBase;
     uint32_t  loadBias;
+
+    bool      isGuestLib;
+    uint32_t  initAddr;
+    uint32_t  initArrayAddr;
+    uint32_t  initArraySize;
+    uint32_t  pltGotAddr;
 } ElfLoader;
 
 
@@ -24,4 +30,9 @@ bool execute(ElfLoader *loader, int argc, char **argv, char **envp);
 void pre_reserve_address_space(const char *path);
 bool load(ElfLoader *loader, const char *path);
 void *get_base_address(const ElfLoader *loader);
+
+void  elf_run_guest_initializers(void);
+void *elf_lookup_guest_library_symbol(const char *name);
+
+size_t elf_patch_writable_code_stubs(const char *prefix, void *(*resolver)(const char *name));
 int hook_ret_zero(void);

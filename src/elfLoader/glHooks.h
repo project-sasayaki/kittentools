@@ -2,6 +2,12 @@
 #include <glad/gl.h>
 
 void *GLHooks_GetProcAddress(const char *procName);
+
+/* Stand-in for the default framebuffer; 0 = off. */
+void GLHooks_SetDefaultFramebuffer(GLuint fbo);
+
+typedef GLuint (*GLHooksReadResolver)(void);
+void GLHooks_SetDefaultReadResolver(GLHooksReadResolver resolver);
 void __attribute__((cdecl)) wrap_glVertex3f(GLfloat x, GLfloat y, GLfloat z);
 void __attribute__((cdecl)) wrap_glNormal3f(GLfloat nx, GLfloat ny, GLfloat nz);
 void __attribute__((cdecl)) wrap_glNormal3fv(const GLfloat *normal);

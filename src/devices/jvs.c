@@ -71,6 +71,22 @@ static JVSStatus cmd_read_switches() {
     uint8_t switch_bytes = (uint8_t)JvsRead();
     struct io3_switch_state state;
 
+    if (io.capabilities.switches > 16 && switch_bytes >= 1 && switch_bytes <= 3) {
+        JvsWrite(REPORT_SUCCESS);
+        memset(&state, 0, sizeof(state));
+        if (io.ops && io.ops->read_switches)
+            io.ops->read_switches(&state);
+        JvsWrite(state.system);
+        for (uint8_t player = 0; player < players; player++) {
+            uint16_t word = player == 0 ? state.p1 : (player == 1 ? state.p2 : 0);
+            uint8_t extra = player == 0 ? state.p1Extra : (player == 1 ? state.p2Extra : 0);
+            uint8_t bytes[3] = {(uint8_t)(word >> 8), (uint8_t)word, extra};
+            for (uint8_t b = 0; b < switch_bytes; b++)
+                JvsWrite(bytes[b]);
+        }
+        return JVS_STATUS_SUCCESS;
+    }
+
     if (players > io.capabilities.players || switch_bytes != 2) {
         JvsWrite(REPORT_PARAMETER_ERROR2);
     }
@@ -128,6 +144,26 @@ int initJVS(JVSIOType type)
         strcpy(io.capabilities.name, "SEGA CORPORATION;I/O BD JVS;837-14572;Ver1.00;2005/10");
     }
     break;
+
+    case NAMCO_FCA1:
+    {
+        /* n2JvioCheckRevisionError wants command and JVS revision 1.0. */
+        memset(&io.capabilities, 0, sizeof(io.capabilities));
+        io.capabilities.players = 2;
+        io.capabilities.switches = 24;
+        io.capabilities.coins = 2;
+        io.capabilities.analogueInChannels = 8;
+        io.capabilities.analogueInBits = 16;
+        io.capabilities.rotaryChannels = 1;
+        io.capabilities.generalPurposeInputs = 16;
+        io.capabilities.generalPurposeOutputs = 6;
+        io.capabilities.analogueOutChannels = 4;
+        io.capabilities.commandVersion = 0x10;
+        io.capabilities.jvsVersion = 0x10;
+        io.capabilities.commsVersion = 0x10;
+        strcpy(io.capabilities.name, "namco ltd.;FCA-1;Ver1.00;JPN,Multipurpose + Rotary Encoder");
+    }
+    break;
     }
 
     for (int analogueChannels = 0; analogueChannels < io.capabilities.analogueInChannels; analogueChannels++)
@@ -171,17 +207,54 @@ void writeFeatures(JVSCapabilities *capabilities)
     if (capabilities->keypad)
         writeFeature(CAP_KEYPAD, 0x00, 0x00, 0x00);
 
+    if (capabilities->generalPurposeInputs)
+        writeFeature(CAP_GPI, 0x00, capabilities->generalPurposeInputs, 0x00);
+
     /* Output Functions */
     if (capabilities->generalPurposeOutputs)
         writeFeature(CAP_GPO, capabilities->generalPurposeOutputs, 0x00, 0x00);
-    
+
+    if (capabilities->analogueOutChannels)
+        writeFeature(CAP_ANALOG_OUT, capabilities->analogueOutChannels, 0x00, 0x00);
+
     JvsWrite(CAP_END);
 }
+
+static void JvsProcess(int *packetSize);
 
 JVSStatus JvsHandle(int *packetSize)
 {
     JvsDecode();
+    JvsProcess(packetSize);
+    return JVS_STATUS_SUCCESS;
+}
 
+JVSStatus JvsHandleUnescaped(const uint8_t *packet, size_t length, int *packetSize)
+{
+    if (length < 3 || length + 1 > JVS_MAX_PACKET_SIZE || (size_t)packet[1] + 2 != length)
+        return JVS_STATUS_ERROR;
+
+    uint8_t checksum = 0;
+    for (size_t i = 0; i + 1 < length; i++)
+        checksum += packet[i];
+    if (checksum != packet[length - 1])
+    {
+        log_error(plfJvs, "JVS Packet: invalid checksum %02x, expected %02x", checksum, packet[length - 1]);
+        return JVS_STATUS_ERROR_CHECKSUM;
+    }
+
+    memset(io.m_jvsInData, 0, sizeof(io.m_jvsInData));
+    io.m_jvsInData[0] = SYNC;
+    memcpy(io.m_jvsInData + 1, packet, length);
+    io.m_nOutIdx = 3;
+    io.m_nInIdx = 3;
+
+    JvsProcess(packetSize);
+    return JVS_STATUS_SUCCESS;
+}
+
+static void JvsProcess(int *packetSize)
+{
     JVSPacket *inPkt = (JVSPacket *)&io.m_jvsInData;
     JVSPacket *outPkt = (JVSPacket *)&io.m_jvsOutData;
     outPkt->m_Dst = BUS_MASTER;
@@ -316,10 +389,38 @@ JVSStatus JvsHandle(int *packetSize)
                 JvsWrite(REPORT_SUCCESS);
             }
             break;
+            case CMD_CONVEY_ID:
+            {
+                while (io.m_nInIdx < inPkt->m_nBytes + 2 && JvsRead() != 0)
+                    ;
+                JvsWrite(REPORT_SUCCESS);
+            }
+            break;
+
+            case CMD_NAMCO_SPECIFIC:
+            {
+                /* Namco's own payload; the N2 master only wants the ack. */
+                JvsWrite(REPORT_SUCCESS);
+                io.m_nInIdx = inPkt->m_nBytes + 2;
+            }
+            break;
+
+            case CMD_WRITE_ANALOG:
+            {
+                /* Two bytes per declared analogue output channel. */
+                if (io.capabilities.analogueOutChannels)
+                {
+                    uint8_t channels = JvsRead();
+                    for (int i = 0; i < channels * 2; i++)
+                        JvsRead();
+                }
+                JvsWrite(REPORT_SUCCESS);
+            }
+            break;
+
             case CMD_SET_PAYOUT:
             case CMD_WRITE_GPO_BYTE:
             case CMD_WRITE_GPO_BIT:
-            case CMD_WRITE_ANALOG:
             case CMD_SUBTRACT_PAYOUT:
             case CMD_WRITE_COINS:
             case CMD_WRITE_DISPLAY:
@@ -356,8 +457,6 @@ JVSStatus JvsHandle(int *packetSize)
     pthread_mutex_unlock(&jvsMutex);
 
     JvsEncode(outPkt, packetSize);
-
-    return JVS_STATUS_SUCCESS;
 }
 
 JVSStatus JvsDecode()

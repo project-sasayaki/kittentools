@@ -156,6 +156,8 @@ int pthreadEmu_pthreadAttrGetstacksize(const void* attr, size_t* stacksize) {
 // Thread Functions
 // ============================================================
 
+#define GUEST_THREAD_STACK_COMMIT (4u * 1024u * 1024u)
+
 int pthreadEmu_pthreadCreate(void* thread, const void* attr,
                                 void* (*start_routine)(void*), void* arg) {
     if (!thread || !start_routine) return LINUX_EINVAL;
@@ -188,6 +190,10 @@ int pthreadEmu_pthreadCreate(void* thread, const void* attr,
     }
 
     thread_info->detached = (detach_state == LINUX_PTHREAD_CREATE_DETACHED);
+
+    // Linux code has no stack probes, so commit the whole stack up front.
+    if (stack_size < GUEST_THREAD_STACK_COMMIT)
+        stack_size = GUEST_THREAD_STACK_COMMIT;
 
     // Create the thread
     unsigned thread_id;

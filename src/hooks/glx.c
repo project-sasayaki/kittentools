@@ -486,7 +486,9 @@ void hook_GlxSwapBuffers(Display *dpy, GLXDrawable drawable)
     irOnSwap(msGetSinkFBO()); /* guarantee the sink/composite FBO is scaled */
     msOnSwap();               /* resolve the sink FBO if the engine presented it dirty */
     fpsLimiter();
+    frameTimeLog_beforeSwap();
     SwapBuffers(g_WindowDC);
+    frameTimeLog_afterSwap();
 }
 
 void hook_gluPerspective(double fovy, double aspect, double zNear, double zFar)

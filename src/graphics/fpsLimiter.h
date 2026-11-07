@@ -7,3 +7,6 @@
 
 void initFpsLimiter(int _fpsNum, int _fpsDen, bool busyWait);
 void fpsLimiter();
+/* KITTEN_FRAMETIME_LOG=<file>: per-present timings. */
+void frameTimeLog_beforeSwap(void);
+void frameTimeLog_afterSwap(void);

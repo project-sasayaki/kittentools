@@ -430,15 +430,145 @@ void __attribute__((cdecl)) wrap_glGenFramebuffersEXT(GLsizei n, GLuint *framebu
     irOnGenFramebuffers(n, framebuffers);
 }
 
+static GLuint g_defaultFramebuffer;
+
+void GLHooks_SetDefaultFramebuffer(GLuint fbo)
+{
+    g_defaultFramebuffer = fbo;
+}
+
 void __attribute__((cdecl)) wrap_glBindFramebufferEXT(GLenum target, GLuint framebuffer)
 {
     msOnBindFramebuffer(target, framebuffer);
     irOnBindFramebuffer(target, framebuffer);
 
+    if (framebuffer == 0)
+        framebuffer = g_defaultFramebuffer;
     if (glad_glBindFramebuffer)
         glad_glBindFramebuffer(target, framebuffer);
     else if (glad_glBindFramebufferEXT)
         glad_glBindFramebufferEXT(target, framebuffer);
+}
+
+void __attribute__((cdecl)) wrap_glBindFramebuffer(GLenum target, GLuint framebuffer)
+{
+    if (framebuffer == 0)
+        framebuffer = g_defaultFramebuffer;
+    if (glad_glBindFramebuffer)
+        glad_glBindFramebuffer(target, framebuffer);
+}
+
+static GLenum default_buffer_name(GLenum buffer, GLenum bindingQuery)
+{
+    if (!g_defaultFramebuffer)
+        return buffer;
+    switch (buffer)
+    {
+        case GL_BACK: case GL_FRONT: case GL_BACK_LEFT: case GL_FRONT_LEFT:
+        case GL_LEFT: case GL_FRONT_AND_BACK:
+            break;
+        default:
+            return buffer;
+    }
+    GLint bound = 0;
+    glad_glGetIntegerv(bindingQuery, &bound);
+    return (GLuint)bound == g_defaultFramebuffer ? GL_COLOR_ATTACHMENT0 : buffer;
+}
+
+void __attribute__((cdecl)) wrap_glDrawBuffer(GLenum buf)
+{
+    if (glad_glDrawBuffer)
+        glad_glDrawBuffer(default_buffer_name(buf, GL_DRAW_FRAMEBUFFER_BINDING));
+}
+
+void __attribute__((cdecl)) wrap_glReadBuffer(GLenum src)
+{
+    if (glad_glReadBuffer)
+        glad_glReadBuffer(default_buffer_name(src, GL_READ_FRAMEBUFFER_BINDING));
+}
+
+static GLHooksReadResolver g_defaultReadResolver;
+
+void GLHooks_SetDefaultReadResolver(GLHooksReadResolver resolver)
+{
+    g_defaultReadResolver = resolver;
+}
+
+static GLuint begin_default_read(void)
+{
+    if (!g_defaultReadResolver || !g_defaultFramebuffer)
+        return 0;
+    GLint bound = 0;
+    glad_glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &bound);
+    if ((GLuint)bound != g_defaultFramebuffer)
+        return 0;
+    GLuint resolved = g_defaultReadResolver();
+    if (!resolved)
+        return 0;
+    glad_glBindFramebuffer(GL_READ_FRAMEBUFFER, resolved);
+    return g_defaultFramebuffer;
+}
+
+static void end_default_read(GLuint previous)
+{
+    if (previous)
+        glad_glBindFramebuffer(GL_READ_FRAMEBUFFER, previous);
+}
+
+void __attribute__((cdecl)) wrap_glReadPixels(GLint x, GLint y, GLsizei width, GLsizei height, GLenum format,
+                                              GLenum type, void *pixels)
+{
+    GLuint previous = begin_default_read();
+    glad_glReadPixels(x, y, width, height, format, type, pixels);
+    end_default_read(previous);
+}
+
+void __attribute__((cdecl)) wrap_glCopyPixels(GLint x, GLint y, GLsizei width, GLsizei height, GLenum type)
+{
+    GLuint previous = begin_default_read();
+    glad_glCopyPixels(x, y, width, height, type);
+    end_default_read(previous);
+}
+
+void __attribute__((cdecl)) wrap_glCopyTexImage1D(GLenum target, GLint level, GLenum internalformat, GLint x,
+                                                  GLint y, GLsizei width, GLint border)
+{
+    GLuint previous = begin_default_read();
+    glad_glCopyTexImage1D(target, level, internalformat, x, y, width, border);
+    end_default_read(previous);
+}
+
+void __attribute__((cdecl)) wrap_glCopyTexImage2D(GLenum target, GLint level, GLenum internalformat, GLint x,
+                                                  GLint y, GLsizei width, GLsizei height, GLint border)
+{
+    GLuint previous = begin_default_read();
+    glad_glCopyTexImage2D(target, level, internalformat, x, y, width, height, border);
+    end_default_read(previous);
+}
+
+void __attribute__((cdecl)) wrap_glCopyTexSubImage1D(GLenum target, GLint level, GLint xoffset, GLint x, GLint y,
+                                                     GLsizei width)
+{
+    GLuint previous = begin_default_read();
+    glad_glCopyTexSubImage1D(target, level, xoffset, x, y, width);
+    end_default_read(previous);
+}
+
+void __attribute__((cdecl)) wrap_glCopyTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset,
+                                                     GLint x, GLint y, GLsizei width, GLsizei height)
+{
+    GLuint previous = begin_default_read();
+    glad_glCopyTexSubImage2D(target, level, xoffset, yoffset, x, y, width, height);
+    end_default_read(previous);
+}
+
+void __attribute__((cdecl)) wrap_glCopyTexSubImage3D(GLenum target, GLint level, GLint xoffset, GLint yoffset,
+                                                     GLint zoffset, GLint x, GLint y, GLsizei width, GLsizei height)
+{
+    GLuint previous = begin_default_read();
+    if (glad_glCopyTexSubImage3D)
+        glad_glCopyTexSubImage3D(target, level, xoffset, yoffset, zoffset, x, y, width, height);
+    end_default_read(previous);
 }
 
 void __attribute__((cdecl)) wrap_glFramebufferTexture2DEXT(GLenum target, GLenum attachment, GLenum textarget, GLuint texture,
@@ -634,6 +764,16 @@ static const GLHookEntry s_hookTable[] = {
     { "glTexCoordPointer", (void *)&wrap_glTexCoordPointer },
     { "glGenFramebuffersEXT", (void *)&wrap_glGenFramebuffersEXT },
     { "glBindFramebufferEXT", (void *)&wrap_glBindFramebufferEXT },
+    { "glBindFramebuffer", (void *)&wrap_glBindFramebuffer },
+    { "glDrawBuffer", (void *)&wrap_glDrawBuffer },
+    { "glReadBuffer", (void *)&wrap_glReadBuffer },
+    { "glReadPixels", (void *)&wrap_glReadPixels },
+    { "glCopyPixels", (void *)&wrap_glCopyPixels },
+    { "glCopyTexImage1D", (void *)&wrap_glCopyTexImage1D },
+    { "glCopyTexImage2D", (void *)&wrap_glCopyTexImage2D },
+    { "glCopyTexSubImage1D", (void *)&wrap_glCopyTexSubImage1D },
+    { "glCopyTexSubImage2D", (void *)&wrap_glCopyTexSubImage2D },
+    { "glCopyTexSubImage3D", (void *)&wrap_glCopyTexSubImage3D },
     { "glFramebufferTexture2DEXT", (void *)&wrap_glFramebufferTexture2DEXT },
     { "glDeleteFramebuffersEXT", (void *)&wrap_glDeleteFramebuffersEXT },
     { "glCheckFramebufferStatusEXT", (void *)&wrap_glCheckFramebufferStatusEXT },

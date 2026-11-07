@@ -82,6 +82,25 @@ static IDirectInputEffect *idas_di_fx;
 static IDirectInputEffect *idas_di_fx_spring;
 static IDirectInputEffect *idas_di_fx_rumble;
 static IDirectInputEffect *idas_di_fx_damper;
+static volatile LONG idas_di_ffb_closed;
+
+/* A wheel keeps its last effect after the process dies. */
+static void idas_di_ffb_release(void)
+{
+    if (InterlockedExchange(&idas_di_ffb_closed, 1))
+        return;
+    if (idas_di_dev != NULL) {
+        IDirectInputDevice8_SendForceFeedbackCommand(idas_di_dev, DISFFC_RESET);
+        IDirectInputDevice8_Unacquire(idas_di_dev);
+    }
+}
+
+static BOOL WINAPI idas_di_console_ctrl(DWORD type)
+{
+    (void)type;
+    idas_di_ffb_release();
+    return FALSE;
+}
 
 /* Max FFB Board value is 127 */
 static const double idas_di_ffb_scale = 127.0;
@@ -264,6 +283,8 @@ HRESULT idas_di_init(const struct idas_io_backend **backend)
 
     log_info(plfBoot, "DirectInput Controller initialized");
     *backend = &idas_di_backend;
+    atexit(idas_di_ffb_release);
+    SetConsoleCtrlHandler(idas_di_console_ctrl, TRUE);
 
     return S_OK;
 }
@@ -580,6 +601,16 @@ HRESULT di_dev_poll(
     return hr;
 }
 
+bool idas_di_read_buttons(uint8_t buttons[128])
+{
+    union idas_di_state state;
+
+    if (idas_di_dev == NULL || FAILED(di_dev_poll(idas_di_dev, &state)))
+        return false;
+    memcpy(buttons, state.st.rgbButtons, 128);
+    return true;
+}
+
 static uint8_t idas_di_decode_pov(DWORD pov)
 {
     switch (pov) {
@@ -744,7 +775,7 @@ static void idas_di_ffb_init(void) {
 }
 
 static void idas_di_ffb_toggle(bool active) {
-    if (active) {
+    if (active || idas_di_ffb_closed) {
         return;
     }
 
@@ -775,6 +806,8 @@ static void idas_di_ffb_toggle(bool active) {
 }
 
 static void idas_di_ffb_constant_force(uint8_t direction_ffb, uint8_t force) {
+    if (idas_di_ffb_closed)
+        return;
     /* DI expects a magnitude in the range of -10.000 to 10.000 */
     uint16_t ffb_strength = Config.ffb.constantForceStrength * 100;
     if (ffb_strength == 0) {
@@ -825,6 +858,8 @@ static void idas_di_ffb_constant_force(uint8_t direction_ffb, uint8_t force) {
 }
 
 static void idas_di_ffb_rumble(uint8_t force, uint8_t period) {
+    if (idas_di_ffb_closed)
+        return;
     /* DI expects a magnitude in the range of -10.000 to 10.000 */
     uint16_t ffb_strength = Config.ffb.rumbleStrength * 100;
     if (ffb_strength == 0) {
@@ -866,6 +901,8 @@ static void idas_di_ffb_rumble(uint8_t force, uint8_t period) {
 }
 
 static void idas_di_ffb_damper(uint8_t force) {
+    if (idas_di_ffb_closed)
+        return;
     uint32_t ffb_base_damper = Config.ffb.baseDamperStrength;
     uint32_t ffb_deadband = Config.ffb.deadBand;
     /* DI expects a coefficient in the range of -10.000 to 10.000 */

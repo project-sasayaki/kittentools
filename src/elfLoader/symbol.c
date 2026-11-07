@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <stdint.h>
+#include <unwind.h>
 
 #include "collections.h"
 #include "memory.h"
@@ -14,6 +15,7 @@
 #include "symbol.h"
 #include "../log/log.h"
 #include "libc.h"
+#include "libcExtra.h"
 
 
 extern void *GLHooks_GetProcAddress(const char *procName);
@@ -31,6 +33,7 @@ static StrMap   g_LibraryMap;
 static StrMap   g_OriginalSymbolPtrs; 
 
 static PtrList  g_LoadedLibraries;
+static bool     g_GuestRuntime = false;
 
 void __gmon_start__(void){}
 
@@ -43,12 +46,15 @@ int __libc_start_main(int (*main_func)(int, char **, char **), int argc, char **
     WSADATA wsaData;
     WSAStartup(MAKEWORD(2, 2), &wsaData);
 
+    elf_run_guest_initializers();
+
     init();
 
     char **envp = argv + argc + 1;
 
     KittenSetLogBasename(g_ElfName);
 
+    log_info(plfSymbolResolv, "Entering guest main()");
     int exitCode = main_func(argc, argv, envp);
     log_debug(plfSymbolResolv, "Program main() exited with code: %d", exitCode);
 
@@ -242,6 +248,50 @@ void symres_register_library(const char *linuxName, const char *windowsName)
     log_trace(plfSymbolResolv, "Registered library substitution: %s -> %s", linuxName, windowsName);
 }
 
+bool symres_is_library_registered(const char *linuxName)
+{
+    return strMap_Has(&g_LibraryMap, linuxName) != 0;
+}
+
+extern void __register_frame_info_bases(const void *begin, void *object, void *textBase, void *dataBase);
+
+void symres_enable_guest_runtime(void)
+{
+    if (g_GuestRuntime)
+        return;
+    g_GuestRuntime = true;
+
+    symbol_register("_Unwind_RaiseException", (void *)_Unwind_RaiseException, NULL);
+    symbol_register("_Unwind_Resume", (void *)_Unwind_Resume, NULL);
+    symbol_register("_Unwind_Resume_or_Rethrow", (void *)_Unwind_Resume_or_Rethrow, NULL);
+    symbol_register("_Unwind_ForcedUnwind", (void *)_Unwind_ForcedUnwind, NULL);
+    symbol_register("_Unwind_DeleteException", (void *)_Unwind_DeleteException, NULL);
+    symbol_register("_Unwind_Backtrace", (void *)_Unwind_Backtrace, NULL);
+    symbol_register("_Unwind_GetGR", (void *)_Unwind_GetGR, NULL);
+    symbol_register("_Unwind_SetGR", (void *)_Unwind_SetGR, NULL);
+    symbol_register("_Unwind_GetIP", (void *)_Unwind_GetIP, NULL);
+    symbol_register("_Unwind_GetIPInfo", (void *)_Unwind_GetIPInfo, NULL);
+    symbol_register("_Unwind_SetIP", (void *)_Unwind_SetIP, NULL);
+    symbol_register("_Unwind_GetCFA", (void *)_Unwind_GetCFA, NULL);
+    symbol_register("_Unwind_GetLanguageSpecificData", (void *)_Unwind_GetLanguageSpecificData, NULL);
+    symbol_register("_Unwind_GetRegionStart", (void *)_Unwind_GetRegionStart, NULL);
+    symbol_register("_Unwind_GetDataRelBase", (void *)_Unwind_GetDataRelBase, NULL);
+    symbol_register("_Unwind_GetTextRelBase", (void *)_Unwind_GetTextRelBase, NULL);
+    symbol_register("_Unwind_FindEnclosingFunction", (void *)_Unwind_FindEnclosingFunction, NULL);
+
+    libcExtra_trace_cxx_throws();
+
+    log_info(plfSymbolResolv, "Guest C++ runtime enabled (static libgcc unwinder)");
+}
+
+void symres_register_guest_eh_frame(void *ehFrameBegin, void *dataBase)
+{
+    void *object = calloc(1, 64);
+    if (!object)
+        return;
+    __register_frame_info_bases(ehFrameBegin, object, NULL, dataBase);
+}
+
 void *symres_get_vtable(const char *className)
 {
     return strMap_Get(&g_VTables, className);
@@ -257,14 +307,17 @@ void *symres_resolve_symbol(const char *symbolName)
         strncmp(symbolName, "_ITM_deregisterTMCloneTable", 27) == 0 ||
         strncmp(symbolName, "_ITM_registerTMCloneTable", 27) == 0 ||
         strncmp(symbolName, "_Jv_RegisterClasses", 19) == 0 ||
-        strncmp(symbolName, "__cxa_finalize", 14) == 0)
+        strncmp(symbolName, "__cxa_finalize", 14) == 0 ||
+        strncmp(symbolName, "__register_frame_info", 21) == 0 ||
+        strncmp(symbolName, "__deregister_frame_info", 23) == 0)
     {
         log_debug(plfSymbolResolv, "Resolved weak symbol '%s' to NULL (Not Implemented/Required)", symbolName);
         return (void *)(uintptr_t)&hook_ret_zero;
     }
 
-    if (strncmp(symbolName, "_Unwind_", 8) == 0 ||
-        strcmp(symbolName, "__gxx_personality_v0") == 0)
+    if (!g_GuestRuntime &&
+        (strncmp(symbolName, "_Unwind_", 8) == 0 ||
+         strcmp(symbolName, "__gxx_personality_v0") == 0))
     {
         return (void *)(uintptr_t)&hook_ret_zero;
     }

@@ -39,7 +39,25 @@ typedef struct
     const char **needed;
     size_t       neededCount;
     RelocTags    reloc;
+    uint32_t     initAddr;
+    uint32_t     initArrayAddr;
+    uint32_t     initArraySize;
+    uint32_t     pltGotAddr;
 } DynInfo;
+
+#define MAX_GUEST_LIBS 64
+
+static char       g_GuestLibDir[MAX_PATH];
+static bool       g_GuestLibDirSet = false;
+static ElfLoader *g_GuestLibs[MAX_GUEST_LIBS];
+static size_t     g_GuestLibCount = 0;
+static ElfLoader *g_GuestInitOrder[MAX_GUEST_LIBS];
+static size_t     g_GuestInitCount = 0;
+static ElfLoader *g_MainLoader = NULL;
+
+static void set_guest_library_dir(const char *elfPath);
+static bool load_guest_library(const char *name);
+static void register_eh_frame(ElfLoader *loader);
 
 static bool map_segments_to_memory(ElfLoader *loader);
 static bool export_symbols(ElfLoader *loader);
@@ -165,25 +183,312 @@ bool load(ElfLoader *loader, const char *path)
 
     log_debug(plfELFLoader, "Successfully parsed 32-bit x86 ELF: %s", path);
 
+    if (!loader->isGuestLib && !g_GuestLibDirSet)
+    {
+        set_guest_library_dir(path);
+        g_MainLoader = loader;
+    }
+
     if (!map_segments_to_memory(loader))
         return false;
 
     if (!export_symbols(loader))
         return false;
 
-    if (!resolve_vtables(loader))
+    /* The executable holds R_386_COPY copies of libstdc++ vtables; a guest library must not replace them. */
+    if (!loader->isGuestLib && !resolve_vtables(loader))
         return false;
 
     /* Single SHT_DYNAMIC sweep feeds both dependency loading and relocation. */
     DynInfo dyn;
     collect_dynamic_info(&loader->elf, &dyn);
+    loader->initAddr      = dyn.initAddr;
+    loader->initArrayAddr = dyn.initArrayAddr;
+    loader->initArraySize = dyn.initArraySize;
+    loader->pltGotAddr    = dyn.pltGotAddr;
 
     bool ok = load_dependencies(loader, &dyn) && process_relocations_with(loader, &dyn);
     free_dynamic_info(&dyn);
     if (!ok)
         return false;
 
+    if (g_GuestInitCount > 0 || loader->isGuestLib)
+        register_eh_frame(loader);
+
     return true;
+}
+
+static void set_guest_library_dir(const char *elfPath)
+{
+    char dir[MAX_PATH];
+    strncpy(dir, elfPath, sizeof(dir) - 1);
+    dir[sizeof(dir) - 1] = '\0';
+
+    char *slash = strrchr(dir, '/');
+    char *backslash = strrchr(dir, '\\');
+    if (backslash && (!slash || backslash > slash))
+        slash = backslash;
+
+    if (slash)
+        *slash = '\0';
+    else
+        strcpy(dir, ".");
+
+    snprintf(g_GuestLibDir, sizeof(g_GuestLibDir), "%s\\libso", dir);
+    g_GuestLibDirSet = true;
+}
+
+static bool is_usable_file(const char *path)
+{
+    WIN32_FILE_ATTRIBUTE_DATA info;
+    if (!GetFileAttributesExA(path, GetFileExInfoStandard, &info))
+        return false;
+    if (info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+        return false;
+    if (info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
+    {
+        HANDLE h = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                               NULL, OPEN_EXISTING, 0, NULL);
+        if (h == INVALID_HANDLE_VALUE)
+            return false;
+        LARGE_INTEGER size;
+        bool ok = GetFileSizeEx(h, &size) && size.QuadPart != 0;
+        CloseHandle(h);
+        return ok;
+    }
+    return info.nFileSizeHigh != 0 || info.nFileSizeLow != 0;
+}
+
+/* Dumps may turn a symlink into a text file naming its target. */
+static bool follow_text_link(char *path, size_t pathSize)
+{
+    for (int hop = 0; hop < 8; hop++)
+    {
+        FILE *f = fopen(path, "rb");
+        if (!f)
+            return hop > 0;
+        char target[260];
+        size_t n = fread(target, 1, sizeof(target) - 1, f);
+        bool moreThanTarget = fgetc(f) != EOF;
+        fclose(f);
+
+        if (moreThanTarget || n < 2 || memcmp(target, "\x7f" "ELF", n < 4 ? n : 4) == 0)
+            return hop > 0;
+        target[n] = '\0';
+        size_t len = strcspn(target, "\r\n");
+        target[len] = '\0';
+        for (size_t i = 0; i < len; i++)
+        {
+            if ((unsigned char)target[i] < 0x20 || target[i] == '/' || target[i] == '\\')
+                return hop > 0;
+        }
+        snprintf(path, pathSize, "%s\\%s", g_GuestLibDir, target);
+    }
+    return true;
+}
+
+static bool find_guest_library(const char *name, char *out, size_t outSize)
+{
+    char candidate[256];
+    strncpy(candidate, name, sizeof(candidate) - 1);
+    candidate[sizeof(candidate) - 1] = '\0';
+
+    for (;;)
+    {
+        snprintf(out, outSize, "%s\\%s", g_GuestLibDir, candidate);
+        if (is_usable_file(out))
+        {
+            follow_text_link(out, outSize);
+            if (is_usable_file(out))
+                return true;
+        }
+
+        char *so = strstr(candidate, ".so.");
+        if (!so)
+            return false;
+        char *lastDot = strrchr(candidate, '.');
+        if (!lastDot || lastDot < so + 3)
+            return false;
+        *lastDot = '\0';
+    }
+}
+
+static bool load_guest_library(const char *name)
+{
+    if (!g_GuestLibDirSet)
+        return false;
+
+    char path[MAX_PATH];
+    if (!find_guest_library(name, path, sizeof(path)))
+        return false;
+
+    for (size_t i = 0; i < g_GuestLibCount; ++i)
+    {
+        if (_stricmp(g_GuestLibs[i]->path, path) == 0)
+            return true;
+    }
+
+    if (g_GuestLibCount >= MAX_GUEST_LIBS)
+    {
+        log_error(plfELFLoader, "Too many guest libraries, not loading %s", path);
+        return false;
+    }
+
+    ElfLoader *lib = create();
+    if (!lib)
+        return false;
+    lib->isGuestLib = true;
+    strncpy(lib->path, path, sizeof(lib->path) - 1);
+    g_GuestLibs[g_GuestLibCount++] = lib;
+
+    symres_enable_guest_runtime();
+
+    log_info(plfELFLoader, "Loading guest library %s", path);
+    if (!load(lib, path))
+    {
+        log_error(plfELFLoader, "Failed to load guest library %s", path);
+        return false;
+    }
+
+    g_GuestInitOrder[g_GuestInitCount++] = lib;
+    return true;
+}
+
+size_t elf_patch_writable_code_stubs(const char *prefix, void *(*resolver)(const char *name))
+{
+    ElfLoader *loader = g_MainLoader;
+    if (!loader || !resolver)
+        return 0;
+
+    ElfFile *elf = &loader->elf;
+    size_t dynSymIdx = find_section_by_type(elf, SHT_DYNSYM);
+    if (dynSymIdx == (size_t)-1)
+        return 0;
+
+    const char *strTab = NULL;
+    size_t strTabSize = 0;
+    size_t symCount = 0;
+    const Elf32_Sym *symArr = get_symbol_array(elf, get_section(elf, dynSymIdx), &symCount, &strTab, &strTabSize);
+    if (!symArr || !strTab)
+        return 0;
+
+    const size_t prefixLen = strlen(prefix);
+    const uint32_t writableCode = 0x1 /* SHF_WRITE */ | 0x4 /* SHF_EXECINSTR */;
+    size_t patched = 0;
+
+    for (size_t k = 0; k < symCount; ++k)
+    {
+        const Elf32_Sym *sym = &symArr[k];
+        if (ELF32_ST_TYPE(sym->st_info) != STT_FUNC || sym->st_shndx == 0 ||
+            sym->st_shndx >= get_section_count(elf) || sym->st_name >= strTabSize)
+            continue;
+        if ((get_section(elf, sym->st_shndx)->sh_flags & writableCode) != writableCode)
+            continue;
+
+        const char *name = strTab + sym->st_name;
+        if (strncmp(name, prefix, prefixLen) != 0)
+            continue;
+
+        void *target = resolver(name);
+        if (!target)
+            continue;
+
+        /* mov eax, target ; jmp eax */
+        uint8_t jump[7] = {0xB8, 0, 0, 0, 0, 0xFF, 0xE0};
+        uint32_t targetAddr = (uint32_t)(uintptr_t)target;
+        memcpy(jump + 1, &targetAddr, sizeof(targetAddr));
+
+        uint8_t *slot = (uint8_t *)(uintptr_t)(sym->st_value + loader->loadBias);
+        DWORD oldProtect = 0;
+        if (!VirtualProtect(slot, sizeof(jump), PAGE_EXECUTE_READWRITE, &oldProtect))
+            continue;
+        memcpy(slot, jump, sizeof(jump));
+        VirtualProtect(slot, sizeof(jump), oldProtect, &oldProtect);
+        ++patched;
+    }
+
+    FlushInstructionCache(GetCurrentProcess(), NULL, 0);
+    return patched;
+}
+
+void *elf_lookup_guest_library_symbol(const char *name)
+{
+    for (size_t i = 0; i < g_GuestInitCount; ++i)
+    {
+        ElfLoader *lib = g_GuestInitOrder[i];
+        size_t dynSymIdx = find_section_by_type(&lib->elf, SHT_DYNSYM);
+        if (dynSymIdx == (size_t)-1)
+            continue;
+
+        const char *strTab = NULL;
+        size_t strTabSize = 0;
+        size_t symCount = 0;
+        const Elf32_Sym *symArr = get_symbol_array(&lib->elf, get_section(&lib->elf, dynSymIdx),
+                                                   &symCount, &strTab, &strTabSize);
+        if (!symArr || !strTab)
+            continue;
+
+        for (size_t k = 0; k < symCount; ++k)
+        {
+            const Elf32_Sym *sym = &symArr[k];
+            unsigned char bind = ELF32_ST_BIND(sym->st_info);
+            if (sym->st_shndx == 0 || sym->st_value == 0 || sym->st_name >= strTabSize ||
+                !(bind == STB_GLOBAL || bind == STB_WEAK || bind == 10))
+                continue;
+            if (strcmp(strTab + sym->st_name, name) == 0)
+                return (void *)(uintptr_t)(sym->st_value + lib->loadBias);
+        }
+    }
+    return NULL;
+}
+
+/* The MinGW unwinder only finds frames registered through __register_frame_info. */
+static void register_eh_frame(ElfLoader *loader)
+{
+    ElfFile *elf = &loader->elf;
+    for (size_t i = 0; i < get_section_count(elf); ++i)
+    {
+        const char *name = get_section_name(elf, i);
+        if (!name || strcmp(name, ".eh_frame") != 0)
+            continue;
+
+        const Elf32_Shdr *sec = get_section(elf, i);
+        if (sec->sh_size == 0 || sec->sh_addr == 0)
+            return;
+
+        void *begin = (void *)(uintptr_t)(sec->sh_addr + loader->loadBias);
+        void *dataBase = loader->pltGotAddr ? (void *)(uintptr_t)(loader->pltGotAddr + loader->loadBias) : NULL;
+        symres_register_guest_eh_frame(begin, dataBase);
+        log_debug(plfELFLoader, "Registered .eh_frame of %s at %p", loader->path, begin);
+        return;
+    }
+}
+
+void elf_run_guest_initializers(void)
+{
+    typedef void (*InitFunc)(void);
+
+    for (size_t i = 0; i < g_GuestInitCount; ++i)
+    {
+        ElfLoader *lib = g_GuestInitOrder[i];
+        if (lib->initialized)
+            continue;
+        lib->initialized = true;
+
+        log_debug(plfELFLoader, "Running initialisers of %s", lib->path);
+        if (lib->initAddr)
+            ((InitFunc)(uintptr_t)(lib->initAddr + lib->loadBias))();
+
+        if (lib->initArrayAddr && lib->initArraySize)
+        {
+            uint32_t *array = (uint32_t *)(uintptr_t)(lib->initArrayAddr + lib->loadBias);
+            for (uint32_t k = 0; k < lib->initArraySize / sizeof(uint32_t); ++k)
+            {
+                if (array[k] != 0 && array[k] != 0xFFFFFFFFu)
+                    ((InitFunc)(uintptr_t)array[k])();
+            }
+        }
+    }
 }
 
 static bool map_segments_to_memory(ElfLoader *loader)
@@ -310,15 +615,22 @@ static bool load_dependencies(ElfLoader *loader, const DynInfo *dyn)
         symres_register_library("libGLU.so.1", NULL);
         symres_register_library("libglut.so.3", NULL);
         symres_register_library("libkswapapi.so", NULL);
+        /* Bridged: never load the cabinet's own glibc from libso/. */
+        symres_register_library("libm.so.6", NULL);
+        symres_register_library("librt.so.1", NULL);
+        symres_register_library("ld-linux.so.2", NULL);
     }
 
     /* DT_NEEDED list was already collected by collect_dynamic_info(). */
-    (void)loader;
     for (size_t j = 0; j < dyn->neededCount; ++j)
     {
         const char *str = dyn->needed[j];
-        log_debug(plfELFLoader, "ELF needs library: %s", str);
-        symres_load_needed_library(str);
+        log_debug(plfELFLoader, "%s needs library: %s", loader->path, str);
+
+        if (symres_is_library_registered(str))
+            symres_load_needed_library(str);
+        else if (!load_guest_library(str))
+            log_debug(plfELFLoader, "No bridge or guest copy of %s; its symbols resolve to stubs", str);
     }
     return true;
 }
@@ -408,6 +720,10 @@ static void collect_dynamic_info(ElfFile *elf, DynInfo *dyn)
                 case DT_RELAENT:   r->relaEntSize = value; break;
                 case DT_SYMTAB:    r->dynsymAddr = value; break;
                 case DT_STRTAB:    r->dynstrAddr = value; break;
+                case DT_INIT:          dyn->initAddr = value; break;
+                case DT_INIT_ARRAY:    dyn->initArrayAddr = value; break;
+                case DT_INIT_ARRAYSZ:  dyn->initArraySize = value; break;
+                case DT_PLTGOT:        dyn->pltGotAddr = value; break;
                 case DT_NEEDED:
                     if (dynStr && value < dynStrSize && neededFill < dyn->neededCount)
                         dyn->needed[neededFill++] = dynStr + value;
@@ -603,7 +919,10 @@ static bool process_relocations_with(ElfLoader *loader, const DynInfo *dyn)
                         {
                             if (symSize > 0)
                             {
-                                void *srcAddr = symres_resolve_symbol_in_shared_libs(symbolName);
+                                /* The executable's export is the copy destination; the source is the defining library's. */
+                                void *srcAddr = elf_lookup_guest_library_symbol(symbolName);
+                                if (!srcAddr)
+                                    srcAddr = symres_resolve_symbol_in_shared_libs(symbolName);
                                 if (!srcAddr && symValue != 0)
                                 {
                                     void *candidate = (void *)(uintptr_t)(symValue + loader->loadBias);
@@ -712,6 +1031,10 @@ static bool export_symbols(ElfLoader *loader)
     {
         log_warn(plfELFLoader, "No SHT_DYNSYM section found - nothing to export");
     }
+
+    /* .symtab locals would shadow later objects' exports. */
+    if (loader->isGuestLib)
+        return true;
 
     log_debug(plfELFLoader, "Exporting static symbols for findStaticFnAddr...");
     size_t symIdx = find_section_by_type(elf, SHT_SYMTAB);
