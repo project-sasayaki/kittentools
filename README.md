@@ -1,6 +1,6 @@
 # KittenTools
 
-KittenTools is a Windows compatibility loader that enables SEGA Lindbergh arcade games Initial D series to run natively on Windows with full network support.
+KittenTools is a Windows compatibility loader that enables SEGA Lindbergh arcade games Initial D series to run natively on Windows with full network support, and the Namco System N2 Wangan Midnight Maximum Tune 3 series to run stand-alone.
 
 # Supported Games
 - Initial D Arcade Stage 4 Rev.A (SBML)
@@ -8,6 +8,10 @@ KittenTools is a Windows compatibility loader that enables SEGA Lindbergh arcade
 - Initial D Arcade Stage 4 kai Rev.G (SBML)
 - Initial D Arcade Stage 5 Rev.A (SBQZ)
 - Initial D Arcade Stage 5 Rev.C (SBQZ)
+- Wangan Midnight Maximum Tune 3 JPN/EXP (WM3100-1/3 A70)
+- Wangan Midnight Maximum Tune 3DX JPN/EXP (W3X100-1/4 C09)
+- Wangan Midnight Maximum Tune 3DX+ JPN/EXP (W3P100-1/2 B02)
+- Wangan Midnight Maximum Tune 3DX+ CHN (W3P100-5 A16)
 
 ## Requirements
 
@@ -28,6 +32,12 @@ These libraries can be obtained by installing either of the following NVIDIA Cg 
 
 - **[D5] NVIDIA Cg Toolkit 1.5.0019**
   - Download: [Cg-1.5_Setup.exe](https://developer.download.nvidia.com/cg/Cg_1.5/1.5.0/Cg-1.5_Setup.exe)
+
+Wangan Midnight Maximum Tune 3 / 3DX / 3DX+ also need `OpenAL32.dll` (32-bit) for sound; without it the game runs silent.
+
+- **OpenAL 1.1 Windows Installer**
+  - Download: [oalinst.zip](https://www.openal.org/downloads/oalinst.zip)
+- Alternatively, [OpenAL Soft](https://openal-soft.org/): place its 32-bit `soft_oal.dll` next to `kitten.exe` as `OpenAL32.dll`, or point `[wmmt3] openal_dll` at it.
 
 ## Building
 
