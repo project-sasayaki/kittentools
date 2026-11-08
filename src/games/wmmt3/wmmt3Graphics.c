@@ -629,6 +629,9 @@ void wmmt3_set_window_title(const char *title)
 
 void wmmt3_install_graphics_hooks(void)
 {
+    /* Alchemy feeds conventional arrays; the Initial D remaps would drop its texcoords and colours. */
+    GLHooks_SetIdasArbCompat(0);
+
     hook("admvt_setup", adm_success);
     hook("admShutdown", adm_success);
     hook("admGetString", adm_get_string);
