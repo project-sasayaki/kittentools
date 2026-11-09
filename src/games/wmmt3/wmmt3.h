@@ -25,3 +25,4 @@ bool wmmt3_hook(const char *name, void *replacement, void **next);
 bool is_wmmt3_crc(uint32_t crc);
 
 void init_wmmt3_prepatch(uint32_t crc);
+void wmmt3_install_bink_events(void);
