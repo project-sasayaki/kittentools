@@ -148,7 +148,6 @@ void init_wmmt3_prepatch(uint32_t crc)
     wmmt3_configure_resolution();
     wmmt3_set_window_title(init ? init->windowTitle : "WANGAN MIDNIGHT MAXIMUM TUNE 3");
     wmmt3_install_graphics_hooks();
-    wmmt3_install_bink_events();
     wmmt3_install_kickback_hooks();
     wmmt3_input_init();
     wmmt3_ffb_init();

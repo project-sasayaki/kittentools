@@ -123,10 +123,11 @@ int pthreadEmu_pthreadCondWait(void* cond, void* mutex) {
     PthreadMutexInternal* m = pthreadMapper_GetOrCreateMutex(mutex);
 
     if (!c || !m) return LINUX_EINVAL;
+    if (m->type == LINUX_PTHREAD_MUTEX_NORMAL)
+        return pthreadMutex_WaitNormal(m, &c->cv, INFINITE);
 
     // Save and clear lock state for recursive mutexes
     int saved_count = m->lock_count;
-    // DWORD saved_owner = m->owner_thread;
     m->lock_count = 0;
     m->owner_thread = 0;
 
@@ -151,10 +152,11 @@ int pthreadEmu_pthreadCondTimedwait(void* cond, void* mutex,
     if (!c || !m) return LINUX_EINVAL;
 
     DWORD timeout_ms = TimespecToMilliseconds(abstime);
+    if (m->type == LINUX_PTHREAD_MUTEX_NORMAL)
+        return pthreadMutex_WaitNormal(m, &c->cv, timeout_ms);
 
     // Save and clear lock state for recursive mutexes
     int saved_count = m->lock_count;
-    // DWORD saved_owner = m->owner_thread;
     m->lock_count = 0;
     m->owner_thread = 0;
 
