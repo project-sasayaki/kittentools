@@ -9,6 +9,7 @@
 #include "../graphics/internalRes.h"
 #include "../log/log.h"
 #include "../graphics/msaa.h"
+#include "../graphics/nvShaderCompat.h"
 #include "../graphics/textureFilter.h"
 
 #include "glHooks_list.h"
@@ -32,6 +33,24 @@ typedef struct
     GLfloat values[2][ARB_PARAMETER_CACHE_SIZE][4];
     BYTE valid[2][ARB_PARAMETER_CACHE_SIZE];
 } ArbParameterCache;
+
+static volatile LONG s_idasArbCompat = 1;
+
+void GLHooks_SetIdasArbCompat(int enabled)
+{
+    InterlockedExchange(&s_idasArbCompat, enabled ? 1 : 0);
+}
+
+int GLHooks_IdasArbCompat(void)
+{
+    return s_idasArbCompat != 0;
+}
+
+/* NVIDIA_GPU while the Initial D workarounds are off. */
+static uint8_t idasCompatVendor(void)
+{
+    return s_idasArbCompat ? getGPUVendorID() : NVIDIA_GPU;
+}
 
 static SRWLOCK s_arbParameterCacheLock = SRWLOCK_INIT;
 static ArbParameterCache s_arbParameterCaches[ARB_PARAMETER_CACHE_CONTEXTS];
@@ -107,6 +126,19 @@ void __attribute__((cdecl)) wrap_glProgramStringARB(GLenum target, GLenum format
             target = GL_FRAGMENT_PROGRAM_ARB;
         else if (target == GL_FRAGMENT_PROGRAM_ARB && memcmp(s, "!!ARBvp1.0", 10) == 0)
             target = GL_VERTEX_PROGRAM_ARB;
+
+        /* vp40/fp40 programs only load on NVIDIA. */
+        uint8_t gpuVendor = getGPUVendorID();
+        if (gpuVendor != NVIDIA_GPU)
+        {
+            char *portable = nvShader_recompileNvAssembly(s, (size_t)len, idasCompatVendor() == INTEL_GPU);
+            if (portable)
+            {
+                glad_glProgramStringARB(target, format, (GLsizei)strlen(portable), portable);
+                free(portable);
+                return;
+            }
+        }
     }
 
     glad_glProgramStringARB(target, format, len, string);
@@ -115,7 +147,7 @@ void __attribute__((cdecl)) wrap_glProgramStringARB(GLenum target, GLenum format
 void __attribute__((cdecl)) wrap_glProgramEnvParameter4fvARB(GLenum target, GLuint index,
                                                               const GLfloat *params)
 {
-    uint8_t gpuVendor = getGPUVendorID();
+    uint8_t gpuVendor = idasCompatVendor();
     BOOL mirrorToLocal = gpuVendor == AMD_GPU || gpuVendor == ATI_GPU;
 
     /* ID5 normally rewrites Cg's program.local declarations to program.env and
@@ -137,7 +169,7 @@ void __attribute__((cdecl)) wrap_glProgramEnvParameters4fvEXT(GLenum target, GLu
                                                                GLsizei count,
                                                                const GLfloat *params)
 {
-    uint8_t gpuVendor = getGPUVendorID();
+    uint8_t gpuVendor = idasCompatVendor();
     BOOL mirrorToLocal = gpuVendor == AMD_GPU || gpuVendor == ATI_GPU;
     GLsizei i;
 
@@ -171,7 +203,7 @@ void __attribute__((cdecl)) wrap_glProgramEnvParameters4fvEXT(GLenum target, GLu
 void __attribute__((cdecl)) wrap_glProgramLocalParameter4fvARB(GLenum target, GLuint index,
                                                                 const GLfloat *params)
 {
-    uint8_t gpuVendor = getGPUVendorID();
+    uint8_t gpuVendor = idasCompatVendor();
 
     /* shaderfix-idas keeps Intel's ARB constants in program.env.  IDAS also
      * sends one per-object value through the singular local entry point, so
@@ -198,7 +230,7 @@ void __attribute__((cdecl)) wrap_glBindProgramARB(GLenum target, GLuint program)
         return;
     glad_glBindProgramARB(target, program);
 
-    gpuVendor = getGPUVendorID();
+    gpuVendor = idasCompatVendor();
     targetIndex = arbParameterTargetIndex(target);
     if ((gpuVendor != AMD_GPU && gpuVendor != ATI_GPU) || targetIndex < 0 ||
         !glad_glProgramLocalParameter4fvARB)
@@ -220,7 +252,7 @@ void __attribute__((cdecl)) wrap_glBindProgramARB(GLenum target, GLuint program)
 
 static BOOL useGenericImmediateAttributes(void)
 {
-    uint8_t gpuVendor = getGPUVendorID();
+    uint8_t gpuVendor = idasCompatVendor();
     return gpuVendor == AMD_GPU || gpuVendor == ATI_GPU ||
            gpuVendor == INTEL_GPU;
 }
@@ -421,6 +453,160 @@ void __attribute__((cdecl)) wrap_glTexCoordPointer(GLint size, GLenum type,
     }
     if (glad_glTexCoordPointer)
         glad_glTexCoordPointer(size, type, stride, pointer);
+}
+
+/* NVIDIA aliases generic attributes onto conventional ones (0 position, 2 normal,
+ * 3 colour, 4 secondary colour, 5 fog, 8+n texcoord n); mirror them elsewhere. */
+static BOOL emulateNvAttribAliasing(void)
+{
+    return !s_idasArbCompat && getGPUVendorID() != NVIDIA_GPU;
+}
+
+static void withClientTexture(GLuint unit, void (*fn)(void *), void *ctx)
+{
+    GLint previous = GL_TEXTURE0;
+    glad_glGetIntegerv(GL_CLIENT_ACTIVE_TEXTURE, &previous);
+    glad_glClientActiveTexture(GL_TEXTURE0 + unit);
+    fn(ctx);
+    glad_glClientActiveTexture((GLenum)previous);
+}
+
+typedef struct
+{
+    GLint size;
+    GLenum type;
+    GLsizei stride;
+    const void *pointer;
+} AliasPointer;
+
+static void aliasTexCoordPointer(void *ctx)
+{
+    const AliasPointer *p = (const AliasPointer *)ctx;
+    glad_glTexCoordPointer(p->size, p->type, p->stride, p->pointer);
+}
+
+static void aliasEnableTexCoord(void *ctx)
+{
+    (void)ctx;
+    glad_glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+}
+
+static void aliasDisableTexCoord(void *ctx)
+{
+    (void)ctx;
+    glad_glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+}
+
+static void aliasConventionalPointer(GLuint index, GLint size, GLenum type, GLsizei stride,
+                                     const void *pointer)
+{
+    AliasPointer p = {size, type, stride, pointer};
+    switch (index)
+    {
+        case 0:
+            if (size >= 2)
+                glad_glVertexPointer(size, type, stride, pointer);
+            break;
+        case 2:
+            if (size == 3)
+                glad_glNormalPointer(type, stride, pointer);
+            break;
+        case 3:
+            if (size >= 3)
+                glad_glColorPointer(size, type, stride, pointer);
+            break;
+        case 4:
+            if (size == 3 && glad_glSecondaryColorPointer)
+                glad_glSecondaryColorPointer(size, type, stride, pointer);
+            break;
+        case 5:
+            if (size == 1 && glad_glFogCoordPointer)
+                glad_glFogCoordPointer(type, stride, pointer);
+            break;
+        default:
+            if (index >= 8 && index < 16)
+                withClientTexture(index - 8, aliasTexCoordPointer, &p);
+            break;
+    }
+}
+
+static GLenum aliasClientArray(GLuint index)
+{
+    switch (index)
+    {
+        case 0: return GL_VERTEX_ARRAY;
+        case 2: return GL_NORMAL_ARRAY;
+        case 3: return GL_COLOR_ARRAY;
+        case 4: return GL_SECONDARY_COLOR_ARRAY;
+        case 5: return GL_FOG_COORD_ARRAY;
+        default: return 0;
+    }
+}
+
+static void aliasClientState(GLuint index, BOOL enable)
+{
+    GLenum array = aliasClientArray(index);
+    if (array)
+    {
+        if (enable)
+            glad_glEnableClientState(array);
+        else
+            glad_glDisableClientState(array);
+    }
+    else if (index >= 8 && index < 16)
+        withClientTexture(index - 8, enable ? aliasEnableTexCoord : aliasDisableTexCoord, NULL);
+}
+
+void __attribute__((cdecl)) wrap_glVertexAttribPointerARB(GLuint index, GLint size, GLenum type,
+                                                           GLboolean normalized, GLsizei stride,
+                                                           const void *pointer)
+{
+    if (glad_glVertexAttribPointerARB)
+        glad_glVertexAttribPointerARB(index, size, type, normalized, stride, pointer);
+    if (emulateNvAttribAliasing())
+        aliasConventionalPointer(index, size, type, stride, pointer);
+}
+
+void __attribute__((cdecl)) wrap_glVertexAttribPointer(GLuint index, GLint size, GLenum type,
+                                                        GLboolean normalized, GLsizei stride,
+                                                        const void *pointer)
+{
+    if (glad_glVertexAttribPointer)
+        glad_glVertexAttribPointer(index, size, type, normalized, stride, pointer);
+    if (emulateNvAttribAliasing())
+        aliasConventionalPointer(index, size, type, stride, pointer);
+}
+
+void __attribute__((cdecl)) wrap_glEnableVertexAttribArrayARB(GLuint index)
+{
+    if (glad_glEnableVertexAttribArrayARB)
+        glad_glEnableVertexAttribArrayARB(index);
+    if (emulateNvAttribAliasing())
+        aliasClientState(index, TRUE);
+}
+
+void __attribute__((cdecl)) wrap_glEnableVertexAttribArray(GLuint index)
+{
+    if (glad_glEnableVertexAttribArray)
+        glad_glEnableVertexAttribArray(index);
+    if (emulateNvAttribAliasing())
+        aliasClientState(index, TRUE);
+}
+
+void __attribute__((cdecl)) wrap_glDisableVertexAttribArrayARB(GLuint index)
+{
+    if (glad_glDisableVertexAttribArrayARB)
+        glad_glDisableVertexAttribArrayARB(index);
+    if (emulateNvAttribAliasing())
+        aliasClientState(index, FALSE);
+}
+
+void __attribute__((cdecl)) wrap_glDisableVertexAttribArray(GLuint index)
+{
+    if (glad_glDisableVertexAttribArray)
+        glad_glDisableVertexAttribArray(index);
+    if (emulateNvAttribAliasing())
+        aliasClientState(index, FALSE);
 }
 
 void __attribute__((cdecl)) wrap_glGenFramebuffersEXT(GLsizei n, GLuint *framebuffers)
@@ -762,6 +948,12 @@ static const GLHookEntry s_hookTable[] = {
     { "glNormalPointer", (void *)&wrap_glNormalPointer },
     { "glColorPointer", (void *)&wrap_glColorPointer },
     { "glTexCoordPointer", (void *)&wrap_glTexCoordPointer },
+    { "glVertexAttribPointerARB", (void *)&wrap_glVertexAttribPointerARB },
+    { "glVertexAttribPointer", (void *)&wrap_glVertexAttribPointer },
+    { "glEnableVertexAttribArrayARB", (void *)&wrap_glEnableVertexAttribArrayARB },
+    { "glEnableVertexAttribArray", (void *)&wrap_glEnableVertexAttribArray },
+    { "glDisableVertexAttribArrayARB", (void *)&wrap_glDisableVertexAttribArrayARB },
+    { "glDisableVertexAttribArray", (void *)&wrap_glDisableVertexAttribArray },
     { "glGenFramebuffersEXT", (void *)&wrap_glGenFramebuffersEXT },
     { "glBindFramebufferEXT", (void *)&wrap_glBindFramebufferEXT },
     { "glBindFramebuffer", (void *)&wrap_glBindFramebuffer },

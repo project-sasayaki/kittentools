@@ -341,8 +341,10 @@ static BOOL CALLBACK patchCgCompilerForNonNvidia(PINIT_ONCE once,
     DWORD *shadowOptionOperand = NULL;
     DWORD *shadowSamplerOperand = NULL;
     uint8_t gpuVendor = getGPUVendorID();
-    BOOL patchFormats = gpuVendor == AMD_GPU || gpuVendor == ATI_GPU ||
-                        gpuVendor == INTEL_GPU;
+    /* The semantic and constant-bank patches are for Initial D only. */
+    BOOL idas = GLHooks_IdasArbCompat();
+    BOOL patchFormats = idas && (gpuVendor == AMD_GPU || gpuVendor == ATI_GPU ||
+                                 gpuVendor == INTEL_GPU);
     BOOL intel = gpuVendor == INTEL_GPU;
     DWORD oldProtect;
     size_t i;
@@ -392,7 +394,7 @@ static BOOL CALLBACK patchCgCompilerForNonNvidia(PINIT_ONCE once,
         return TRUE;
     }
 
-    for (i = 0; i < target->semanticPatchCount; ++i)
+    for (i = 0; idas && i < target->semanticPatchCount; ++i)
     {
         const CgSemanticResourcePatch *patch = &target->semanticPatches[i];
         DWORD *resource = (DWORD *)(base + patch->resourceRva);
@@ -494,7 +496,7 @@ static BOOL CALLBACK patchCgCompilerForNonNvidia(PINIT_ONCE once,
         }
     }
 
-    for (i = 0; i < target->semanticPatchCount; ++i)
+    for (i = 0; idas && i < target->semanticPatchCount; ++i)
     {
         const CgSemanticResourcePatch *patch = &target->semanticPatches[i];
         DWORD *resource = (DWORD *)(base + patch->resourceRva);
@@ -509,9 +511,10 @@ static BOOL CALLBACK patchCgCompilerForNonNvidia(PINIT_ONCE once,
         *resource = patch->replacementResource;
         VirtualProtect(resource, sizeof(*resource), oldProtect, &oldProtect);
     }
-    log_debug(plfHooks,
-              "[cg] Cg %s non-NVIDIA compatibility: mapped %zu vertex semantics to generic ATTR resources",
-              target->version, target->semanticPatchCount);
+    if (idas)
+        log_debug(plfHooks,
+                  "[cg] Cg %s non-NVIDIA compatibility: mapped %zu vertex semantics to generic ATTR resources",
+                  target->version, target->semanticPatchCount);
 
     for (i = 0; patchFormats && i < target->localFormatPatchCount; ++i)
     {
@@ -534,7 +537,7 @@ static BOOL CALLBACK patchCgCompilerForNonNvidia(PINIT_ONCE once,
     FlushInstructionCache(GetCurrentProcess(), base, nt->OptionalHeader.SizeOfImage);
     log_debug(plfHooks,
               "[cg] Cg %s non-NVIDIA compatibility: emit ARB program.%s bindings%s",
-              target->version, intel ? "env" : "local",
+              target->version, intel && patchFormats ? "env" : "local",
               shadowOptionOperand != NULL ? " with Intel 2D shadow downgrade" : "");
     return TRUE;
 }
@@ -696,7 +699,7 @@ char *hook_CgCreateProgram(size_t *context, int program_type, const char *progra
     }
 
     useManualConstantBinding =
-        isPortableGpuVendor(gpuVendor) &&
+        isPortableGpuVendor(gpuVendor) && GLHooks_IdasArbCompat() &&
         program_type == CG_PROGRAM_SOURCE && profile == CG_PROFILE_ARBVP1 &&
         canBindCompilerUniformSemantics();
     if (useManualConstantBinding)

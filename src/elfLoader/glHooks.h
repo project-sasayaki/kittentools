@@ -8,6 +8,11 @@ void GLHooks_SetDefaultFramebuffer(GLuint fbo);
 
 typedef GLuint (*GLHooksReadResolver)(void);
 void GLHooks_SetDefaultReadResolver(GLHooksReadResolver resolver);
+
+/* Initial D's AMD/Intel workarounds: vertex data on generic attributes, constants
+ * moved between env and local, Cg patched to match. On by default. */
+void GLHooks_SetIdasArbCompat(int enabled);
+int GLHooks_IdasArbCompat(void);
 void __attribute__((cdecl)) wrap_glVertex3f(GLfloat x, GLfloat y, GLfloat z);
 void __attribute__((cdecl)) wrap_glNormal3f(GLfloat nx, GLfloat ny, GLfloat nz);
 void __attribute__((cdecl)) wrap_glNormal3fv(const GLfloat *normal);
