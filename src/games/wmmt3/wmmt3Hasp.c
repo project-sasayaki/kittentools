@@ -22,8 +22,8 @@
 #define HASP_HANDLE      0x4B54
 
 static uint8_t g_memory[HASP_MEMORY_SIZE];
-static char g_memoryPath[MAX_PATH];
-static char g_countPath[MAX_PATH];
+static char g_memoryPath[MAX_PATH * 2 + 16];
+static char g_countPath[MAX_PATH * 2 + 16];
 static CRITICAL_SECTION g_lock;
 
 static void load_memory(void)
@@ -250,7 +250,7 @@ void wmmt3_install_hasp(void)
                  &g_classes[1].valueHi, &g_classes[1].valueLo);
 
     /* 3DX+ counts HASP keys in the kernel's USB device list. */
-    char usbPath[MAX_PATH];
+    char usbPath[MAX_PATH * 2 + 16];
     snprintf(usbPath, sizeof(usbPath), "%s\\kitten\\proc_bus_usb_devices.txt", cwd);
     FILE *usb = fopen(usbPath, "wb");
     if (usb)

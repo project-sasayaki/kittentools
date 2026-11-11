@@ -40,7 +40,7 @@ bool KittenInit(uint32_t crc)
                 exit(1);
             }
 
-            module->prepatch();
+            module->prepatch(crc);
 
             if (MH_EnableHook(MH_ALL_HOOKS) != MH_OK)
             {

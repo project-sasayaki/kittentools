@@ -1,3 +1,4 @@
+#define WIN32_LEAN_AND_MEAN
 #include <stdio.h>
 #include <stdint.h>
 #include <MinHook.h>
@@ -24,7 +25,7 @@ bool init_idas_detect(uint32_t crc)
     return false;
 }
 
-int init_idas(void)
+void init_idas(void)
 {
     DeviceDescriptor baseboard = {
         .fd = -1,

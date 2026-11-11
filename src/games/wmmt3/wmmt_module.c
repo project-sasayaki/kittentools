@@ -1,3 +1,4 @@
+#define WIN32_LEAN_AND_MEAN
 #include <stdio.h>
 #include <stdint.h>
 #include <MinHook.h>
@@ -17,7 +18,7 @@
 #include "../config/config.h"
 #include "../log/log.h"
 
-static void wmmt3_init(uint32_t crc)
+static void wmmt3_init(void)
 {
     /* Without an argument main() runs as a development build. */
     SetKittenGuestArgument("1");

@@ -47,7 +47,7 @@ typedef struct
 
 #define MAX_GUEST_LIBS 64
 
-static char       g_GuestLibDir[MAX_PATH];
+static char       g_GuestLibDir[MAX_PATH * 2 + 16];
 static bool       g_GuestLibDirSet = false;
 static ElfLoader *g_GuestLibs[MAX_GUEST_LIBS];
 static size_t     g_GuestLibCount = 0;

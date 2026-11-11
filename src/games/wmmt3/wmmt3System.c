@@ -151,7 +151,7 @@ static int answer_find(const char *command)
         if (!out)
             return 1;
 
-        char dir[MAX_PATH], pattern[MAX_PATH];
+        char dir[MAX_PATH], pattern[MAX_PATH * 2 + 16];
         host_path(kinds[k].guestDir, dir, sizeof(dir));
         snprintf(pattern, sizeof(pattern), "%s/*", dir);
 
@@ -175,7 +175,7 @@ static int answer_find(const char *command)
 
 static void copy_matching(const char *fromDir, const char *extension, const char *toGuestDir)
 {
-    char toDir[MAX_PATH], pattern[MAX_PATH];
+    char toDir[MAX_PATH], pattern[MAX_PATH * 2 + 16];
     host_path(toGuestDir, toDir, sizeof(toDir));
     make_dirs(toDir);
     snprintf(pattern, sizeof(pattern), "%s/*", fromDir);
@@ -188,7 +188,7 @@ static void copy_matching(const char *fromDir, const char *extension, const char
     {
         if ((data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || !has_suffix(data.cFileName, extension))
             continue;
-        char from[MAX_PATH], to[MAX_PATH];
+        char from[MAX_PATH * 2 + 16], to[MAX_PATH * 2 + 16];
         snprintf(from, sizeof(from), "%s/%s", fromDir, data.cFileName);
         snprintf(to, sizeof(to), "%s/%s", toDir, data.cFileName);
         CopyFileA(from, to, FALSE);
