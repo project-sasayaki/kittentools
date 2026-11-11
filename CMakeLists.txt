@@ -34,7 +34,10 @@ include_directories(${PROJECT_SOURCE_DIR}/subprojects/inih_dep)
 # glHooks.c includes. GLX functions are bridged separately in glxBridge.c and are
 # not handled by this generator.
 # ------------------------------------------------------------------------------
-find_program(PYTHON_EXECUTABLE NAMES python python3)
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
+set(PYTHON_EXECUTABLE ${Python3_EXECUTABLE})
+
 if(NOT PYTHON_EXECUTABLE)
     message(FATAL_ERROR "Python is required to generate glHooks_list.h from the glad headers")
 endif()
