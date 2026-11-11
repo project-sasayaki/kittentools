@@ -98,10 +98,67 @@ int pthreadEmu_pthreadMutexattrGetpshared(const void* attr, int* pshared) {
 // Mutex Functions
 // ============================================================
 
+/* The caller holds cs. The guest lock is separate from the Windows lock:
+ * glibc's normal mutex unlock does not check the owning thread. */
+static int lock_normal(PthreadMutexInternal *m, DWORD timeout)
+{
+    ULONGLONG deadline = timeout == INFINITE ? 0 : GetTickCount64() + timeout;
+    while (m->lock_count)
+    {
+        if (!timeout)
+            return LINUX_ETIMEDOUT;
+        if (!SleepConditionVariableCS(&m->available, &m->cs, timeout))
+        {
+            if (GetLastError() != ERROR_TIMEOUT)
+                return LINUX_EINVAL;
+            if (m->lock_count)
+                return LINUX_ETIMEDOUT;
+            break;
+        }
+        if (deadline)
+        {
+            ULONGLONG now = GetTickCount64();
+            timeout = now < deadline ? (DWORD)(deadline - now) : 0;
+        }
+    }
+    m->owner_thread = GetCurrentThreadId();
+    m->lock_count = 1;
+    return 0;
+}
+
+static void unlock_normal(PthreadMutexInternal *m)
+{
+    m->owner_thread = 0;
+    m->lock_count = 0;
+    WakeConditionVariable(&m->available);
+}
+
+int pthreadMutex_WaitNormal(PthreadMutexInternal *m, CONDITION_VARIABLE *cond, DWORD timeout)
+{
+    EnterCriticalSection(&m->cs);
+    if (m->owner_thread != GetCurrentThreadId())
+    {
+        LeaveCriticalSection(&m->cs);
+        return LINUX_EPERM;
+    }
+    unlock_normal(m);
+    BOOL woke = SleepConditionVariableCS(cond, &m->cs, timeout);
+    DWORD error = woke ? ERROR_SUCCESS : GetLastError();
+    int result = lock_normal(m, INFINITE);
+    LeaveCriticalSection(&m->cs);
+    if (result)
+        return result;
+    if (woke)
+        return 0;
+    return error == ERROR_TIMEOUT ? LINUX_ETIMEDOUT : LINUX_EINVAL;
+}
+
 int pthreadEmu_pthreadMutexInit(void* mutex, const void* attr) {
     if (!mutex) return LINUX_EINVAL;
 
-    // Get or create mutex
+    /* An explicit init starts a new guest object's lifetime. Its address
+     * can have been reused since an earlier destroy reported EBUSY. */
+    pthreadMapper_DestroyMutex(mutex);
     PthreadMutexInternal* m = pthreadMapper_GetOrCreateMutex(mutex);
     if (!m) return LINUX_ENOMEM;
 
@@ -143,12 +200,12 @@ int pthreadEmu_pthreadMutexLock(void* mutex) {
     DWORD current_thread = GetCurrentThreadId();
 
     switch (m->type) {
-        case LINUX_PTHREAD_MUTEX_NORMAL:
-            // Standard behavior - just lock
+        case LINUX_PTHREAD_MUTEX_NORMAL: {
             EnterCriticalSection(&m->cs);
-            m->owner_thread = current_thread;
-            m->lock_count = 1;
-            break;
+            int result = lock_normal(m, INFINITE);
+            LeaveCriticalSection(&m->cs);
+            return result;
+        }
 
         case LINUX_PTHREAD_MUTEX_RECURSIVE:
             // Allow recursive locking
@@ -180,13 +237,13 @@ int pthreadEmu_pthreadMutexTrylock(void* mutex) {
     DWORD current_thread = GetCurrentThreadId();
 
     switch (m->type) {
-        case LINUX_PTHREAD_MUTEX_NORMAL:
-            if (!TryEnterCriticalSection(&m->cs)) {
+        case LINUX_PTHREAD_MUTEX_NORMAL: {
+            if (!TryEnterCriticalSection(&m->cs))
                 return LINUX_EBUSY;
-            }
-            m->owner_thread = current_thread;
-            m->lock_count = 1;
-            break;
+            int result = lock_normal(m, 0);
+            LeaveCriticalSection(&m->cs);
+            return result == LINUX_ETIMEDOUT ? LINUX_EBUSY : result;
+        }
 
         case LINUX_PTHREAD_MUTEX_RECURSIVE:
             if (!TryEnterCriticalSection(&m->cs)) {
@@ -219,6 +276,13 @@ int pthreadEmu_pthreadMutexTimedlock(void* mutex, const struct timespec* abstime
     if (!m) return LINUX_EINVAL;
 
     DWORD timeout_ms = TimespecToMilliseconds(abstime);
+
+    if (m->type == LINUX_PTHREAD_MUTEX_NORMAL) {
+        EnterCriticalSection(&m->cs);
+        int result = lock_normal(m, timeout_ms);
+        LeaveCriticalSection(&m->cs);
+        return result;
+    }
 
     if (timeout_ms == 0) {
         // Already timed out
@@ -257,8 +321,8 @@ int pthreadEmu_pthreadMutexUnlock(void* mutex) {
 
     switch (m->type) {
         case LINUX_PTHREAD_MUTEX_NORMAL:
-            m->owner_thread = 0;
-            m->lock_count = 0;
+            EnterCriticalSection(&m->cs);
+            unlock_normal(m);
             LeaveCriticalSection(&m->cs);
             break;
 

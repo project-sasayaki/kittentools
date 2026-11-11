@@ -171,7 +171,13 @@ PthreadMutexInternal *pthreadMapper_GetOrCreateMutex(void *linux_mutex)
     }
 
     PthreadMutexInternal *mutex = (PthreadMutexInternal *)calloc(1, sizeof(PthreadMutexInternal));
+    if (!mutex)
+    {
+        ReleaseSRWLockExclusive(&s_lock);
+        return NULL;
+    }
     InitializeCriticalSection(&mutex->cs);
+    InitializeConditionVariable(&mutex->available);
     mutex->type = LINUX_PTHREAD_MUTEX_DEFAULT;
     mutex->owner_thread = 0;
     mutex->lock_count = 0;

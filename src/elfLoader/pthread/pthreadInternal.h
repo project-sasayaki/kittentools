@@ -74,16 +74,18 @@ struct timespec
 /*  Windows side structures                                      */
 /* ============================================================ */
 
-/* Mutex (CRITICAL_SECTION + recursive support) */
 typedef struct PthreadMutexInternal {
     CRITICAL_SECTION    cs;
+    CONDITION_VARIABLE available;      /* NORMAL mutex state is protected by cs */
     int                 type;           /* NORMAL, RECURSIVE, ERRORCHECK */
-    volatile DWORD      owner_thread;   /* For ERRORCHECK */
-    volatile int        lock_count;     /* For ERRORCHECK */
+    volatile DWORD      owner_thread;
+    volatile int        lock_count;     /* Locked flag or recursive depth */
     volatile int        initialized;    /* Magic number for validation */
 } PthreadMutexInternal;
 
 #define MUTEX_INIT_MAGIC    0x4D555458  /* "MUTX" */
+
+int pthreadMutex_WaitNormal(PthreadMutexInternal *mutex, CONDITION_VARIABLE *cond, DWORD timeout);
 
 /* Condition Variable */
 typedef struct PthreadCondInternal {
