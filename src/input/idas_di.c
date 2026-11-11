@@ -611,6 +611,17 @@ bool idas_di_read_buttons(uint8_t buttons[128])
     return true;
 }
 
+bool idas_di_read_shifter_buttons(uint8_t buttons[128])
+{
+    union idas_di_state state;
+    IDirectInputDevice8A *dev_to_use = idas_di_shifter != NULL ? idas_di_shifter : idas_di_dev;
+
+    if (dev_to_use == NULL || FAILED(di_dev_poll(dev_to_use, &state)))
+        return false;
+    memcpy(buttons, state.st.rgbButtons, 128);
+    return true;
+}
+
 static uint8_t idas_di_decode_pov(DWORD pov)
 {
     switch (pov) {

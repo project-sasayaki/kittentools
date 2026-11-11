@@ -86,13 +86,46 @@ static void read_switches(struct io3_switch_state *out)
         g_backend->jvs_read_buttons(&buttons);
         g_backend->jvs_read_shifter(&shifter);
     }
+    uint8_t raw[128];
+    bool haveRaw = Config.io3.mode != INPUT_XINPUT && idas_di_read_buttons(raw);
 
     bool up = shifter & IDAS_IO_GAMEBTN_SHIFTUP;
     bool down = shifter & IDAS_IO_GAMEBTN_SHIFTDN;
-    if (up && !g_shiftUpHeld && g_gear < 6)
-        g_gear++;
-    if (down && !g_shiftDownHeld && g_gear > 0)
-        g_gear--;
+    int directGear = 0;
+    bool directGearRead = false;
+    if (Config.io3.mode != INPUT_XINPUT) {
+        const int gearButtons[] = {
+            Config.dinput.gear1, Config.dinput.gear2, Config.dinput.gear3,
+            Config.dinput.gear4, Config.dinput.gear5, Config.dinput.gear6
+        };
+        bool haveGearBindings = false;
+        for (size_t i = 0; i < sizeof(gearButtons) / sizeof(gearButtons[0]); i++) {
+            if (gearButtons[i] > 0) {
+                haveGearBindings = true;
+                break;
+            }
+        }
+        uint8_t shifterRaw[128];
+        if (haveGearBindings && idas_di_read_shifter_buttons(shifterRaw)) {
+            directGearRead = true;
+            for (size_t i = 0; i < sizeof(gearButtons) / sizeof(gearButtons[0]); i++) {
+                int button = gearButtons[i];
+                if (button > 0 && button <= 128 && (shifterRaw[button - 1] & 0x80)) {
+                    directGear = (int)i + 1;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (directGearRead)
+        g_gear = directGear;
+    else {
+        if (up && !g_shiftUpHeld && g_gear < 6)
+            g_gear++;
+        if (down && !g_shiftDownHeld && g_gear > 0)
+            g_gear--;
+    }
     g_shiftUpHeld = up;
     g_shiftDownHeld = down;
 
@@ -110,8 +143,6 @@ static void read_switches(struct io3_switch_state *out)
         g_gear = 0;
     out->p1 = navigation | gear_switches(g_gear);
 
-    uint8_t raw[128];
-    bool haveRaw = Config.io3.mode != INPUT_XINPUT && idas_di_read_buttons(raw);
 #define WHEEL_BUTTON(n) (haveRaw && (n) > 0 && (n) <= 128 && (raw[(n) - 1] & 0x80))
 
     if ((Config.io3.service && (GetAsyncKeyState(Config.io3.service) & 0x8000)) ||
