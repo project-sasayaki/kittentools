@@ -1,5 +1,5 @@
 
-name: Build KittenTools
+name: Build
 
 on:
   push:

@@ -1,4 +1,5 @@
 # KittenTools
+[![Build](https://github.com/AsukaXVB/kittentools/actions/workflows/build.yml/badge.svg)](https://github.com/AsukaXVB/kittentools/actions/workflows/build.yml)
 
 KittenTools is a Windows compatibility loader that enables SEGA Lindbergh arcade games Initial D series to run natively on Windows with full network support, and the Namco System N2 Wangan Midnight Maximum Tune 3 series to run stand-alone.
 
