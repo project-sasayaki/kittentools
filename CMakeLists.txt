@@ -42,11 +42,20 @@ endif()
 set(GLAD_GL_H ${PROJECT_SOURCE_DIR}/subprojects/glad/include/glad/gl.h)
 set(GEN_GLHOOKS_H ${CMAKE_BINARY_DIR}/glHooks_list.h)
 
+# Hand the generator relative paths (resolved against WORKING_DIRECTORY):
+# with the MSYS Makefiles generator msys python cannot open Windows-style
+# F:/... arguments, and relative paths work with every generator/make combo.
+file(RELATIVE_PATH GEN_GLHOOKS_SCRIPT ${CMAKE_SOURCE_DIR}
+    ${PROJECT_SOURCE_DIR}/scripts/gen_glhooks.py)
+file(RELATIVE_PATH GEN_GLHOOKS_INPUT ${CMAKE_SOURCE_DIR} ${GLAD_GL_H})
+file(RELATIVE_PATH GEN_GLHOOKS_OUTPUT ${CMAKE_SOURCE_DIR} ${GEN_GLHOOKS_H})
+
 add_custom_command(
     OUTPUT ${GEN_GLHOOKS_H}
-    COMMAND ${PYTHON_EXECUTABLE} ${PROJECT_SOURCE_DIR}/scripts/gen_glhooks.py
-            ${GLAD_GL_H} ${GEN_GLHOOKS_H}
+    COMMAND ${PYTHON_EXECUTABLE} ${GEN_GLHOOKS_SCRIPT}
+            ${GEN_GLHOOKS_INPUT} ${GEN_GLHOOKS_OUTPUT}
     DEPENDS ${GLAD_GL_H} ${PROJECT_SOURCE_DIR}/scripts/gen_glhooks.py
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     COMMENT "Generating glHooks_list.h from glad GL header"
     VERBATIM
 )
@@ -154,4 +163,4 @@ endif()
 target_link_directories(${PROJECT_NAME} PRIVATE "libs")
 
 # Link dependencies
-target_link_libraries(${PROJECT_NAME} minhook -static-libgcc -static-libstdc++ xaudio2_9 xapofx gdi32 winmm ole32 ws2_32 opengl32 glu32 pthread psapi xinput dinput8 dxgi dxguid inih iphlpapi mfplat mf mfreadwrite propsys uuid gnurx tre intl iconv dbghelp imm32 gdiplus)
+target_link_libraries(${PROJECT_NAME} minhook -static-libgcc -static-libstdc++ xaudio2_9 xapofx gdi32 winmm ole32 ws2_32 opengl32 glu32 pthread psapi xinput dinput8 dxgi dxguid inih iphlpapi mfplat mf mfreadwrite propsys uuid intl iconv dbghelp imm32 gdiplus)

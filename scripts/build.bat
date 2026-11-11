@@ -82,8 +82,13 @@ set "MSYSTEM=MINGW32"
 
 if "%NEED_CONFIGURE%"=="1" (
     if not exist "%BUILD_DIR%" mkdir "%BUILD_DIR%"
-    echo [1/2] Configuring CMake...
-    "%USR_BIN%\bash.exe" -lc "cd '%MSYS_ROOT%' && cmake -S . -B '%MSYS_BUILD%' -G 'MinGW Makefiles' -DCMAKE_BUILD_TYPE=%BUILD_TYPE%"
+    if "%RECONFIGURE%"=="1" if exist "%BUILD_DIR%\CMakeCache.txt" (
+        echo [INFO] Clearing previous CMake cache for reconfigure...
+        del "%BUILD_DIR%\CMakeCache.txt"
+        if exist "%BUILD_DIR%\CMakeFiles" rmdir /s /q "%BUILD_DIR%\CMakeFiles"
+    )
+    echo [1/2] Configuring CMake with msys make...
+    "%USR_BIN%\bash.exe" -lc "cd '%MSYS_ROOT%' && cmake -S . -B '%MSYS_BUILD%' -G 'MSYS Makefiles' -DCMAKE_BUILD_TYPE=%BUILD_TYPE%"
     if !ERRORLEVEL! NEQ 0 (
         echo [ERROR] CMake configuration failed.
         pause
@@ -108,5 +113,3 @@ echo ============================================
 echo  Build Complete!
 echo  Output: %BUILD_DIR%
 echo ============================================
-
-pause

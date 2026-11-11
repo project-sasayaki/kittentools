@@ -17,9 +17,18 @@ set "MINGW_BIN=%INSTALL_DIR%\mingw32\bin"
 
 :: Check if MSYS2 is already installed
 if not exist "%USR_BIN%\bash.exe" (
-    echo [1/4] Downloading MSYS2 installer...
-    curl -L %MSYS2_URL% -o %INSTALLER_EXE%
-    
+    if exist "%INSTALLER_EXE%" (
+        echo [1/4] Installer already exists, skipping download.
+    ) else (
+        echo [1/4] Downloading MSYS2 installer...
+        curl -L %MSYS2_URL% -o %INSTALLER_EXE%
+        if errorlevel 1 (
+            echo [ERROR] Failed to download MSYS2 installer.
+            pause
+            exit /b 1
+        )
+    )
+
     echo [2/4] Installing MSYS2 silently to %INSTALL_DIR%...
     start /wait "" %INSTALLER_EXE% in --confirm-command --accept-messages --root %INSTALL_DIR%
 ) else (
@@ -28,7 +37,8 @@ if not exist "%USR_BIN%\bash.exe" (
 
 echo [3/4] Installing MinGW32 and required packages...
 "%USR_BIN%\bash.exe" -lc "pacman -Syu --noconfirm"
-"%USR_BIN%\bash.exe" -lc "pacman -S --noconfirm mingw-w64-i686-toolchain mingw-w64-i686-cmake make"
+"%USR_BIN%\bash.exe" -lc "pacman -Syu --noconfirm"
+"%USR_BIN%\bash.exe" -lc "pacman -S --noconfirm mingw-w64-i686-toolchain mingw-w64-i686-cmake python make"
 
 echo [4/4] Adding MSYS2 and MinGW32 to User PATH...
 :: Fetch current User PATH to avoid duplicates
@@ -45,14 +55,9 @@ if defined NEW_PATH (
     echo Paths already exist in Environment Variables.
 )
 
-:: Clean up installer
-if exist "%INSTALLER_EXE%" del "%INSTALLER_EXE%"
-
 echo.
 echo ============================================
 echo  Installation Complete!
 echo  You may need to restart your terminal for
 echo  PATH changes to take effect.
 echo ============================================
-
-pause

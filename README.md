@@ -16,9 +16,9 @@ KittenTools is a Windows compatibility loader that enables SEGA Lindbergh arcade
 
 ## Requirements
 
-- **MSYS2** with MinGW32 toolchain
+- **MSYS2** with MinGW32 toolchain and `make`, `python3`
 - **CMake** >= 3.14
-- **MinGW32** packages: `mingw-w64-i686-toolchain`, `mingw-w64-i686-cmake`, `make`
+- **MinGW32** packages: `mingw-w64-i686-toolchain`, `mingw-w64-i686-cmake`
 ## Runtime Requirements
 
 The following runtime libraries are required:
