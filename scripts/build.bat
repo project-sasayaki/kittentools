@@ -83,7 +83,7 @@ set "MSYSTEM=MINGW32"
 if "%NEED_CONFIGURE%"=="1" (
     if not exist "%BUILD_DIR%" mkdir "%BUILD_DIR%"
     echo [1/2] Configuring CMake...
-    "%USR_BIN%\bash.exe" -lc "cd '%MSYS_ROOT%' && cmake -S . -B '%MSYS_BUILD%' -G 'MinGW Makefiles' -DCMAKE_BUILD_TYPE=%BUILD_TYPE%"
+    "%USR_BIN%\bash.exe" -lc "cd '%MSYS_ROOT%' && cmake -S . -B '%MSYS_BUILD%' -G 'MSYS Makefiles' -DCMAKE_BUILD_TYPE=%BUILD_TYPE%"
     if !ERRORLEVEL! NEQ 0 (
         echo [ERROR] CMake configuration failed.
         pause
