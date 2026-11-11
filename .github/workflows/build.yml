@@ -1,5 +1,5 @@
 
-name: Build KittenTools
+name: Build
 
 on:
   push:
@@ -21,46 +21,24 @@ jobs:
         with:
           python-version: '3.x'
           
+      - name: Install Dependency
+        shell: cmd
+        run: scripts\install_dependency.bat
+          
+      - name: Install Extra Dependency for Workflow
+        shell: cmd
+        run: |
+          C:\msys64\usr\bin\bash.exe -lc "pacman -S --noconfirm mingw-w64-i686-libsystre"   
+          
       - name: Verify Toolchain
         shell: cmd
         run: |
           echo "Checking Toolchain..."
+          gcc --version
           git --version
           python --version
-          
-      - name: Install_Dependency
-        shell: cmd
-        run: scripts\install_dependency.bat
-
-      - name: Install i686 libtre
-        shell: pwsh
-        run: |
-          Invoke-WebRequest `
-            -Uri "https://mirror.jmu.edu/pub/msys2/mingw/mingw32/mingw-w64-i686-libtre-0.9.0-2-any.pkg.tar.zst" `
-            -OutFile "C:\msys64\tmp-libtre.pkg.tar.zst"
-          C:\msys64\usr\bin\bash.exe -lc "pacman -U --noconfirm /tmp-libtre.pkg.tar.zst"
-          
-      - name: Install i686 libsystre
-        shell: pwsh
-        run: |
-          Invoke-WebRequest `
-            -Uri "https://mirror.jmu.edu/pub/msys2/mingw/mingw32/mingw-w64-i686-libsystre-1.0.2-3-any.pkg.tar.zst" `
-            -OutFile "C:\msys64\tmp-libsystre.pkg.tar.zst"
-          C:\msys64\usr\bin\bash.exe -lc "pacman -U --noconfirm /tmp-libsystre.pkg.tar.zst"
-        
-      - name: Install i686 Make
-        shell: pwsh
-        run: |
-          Invoke-WebRequest `
-            -Uri "https://mirror.jmu.edu/pub/msys2/mingw/mingw32/mingw-w64-i686-make-4.4.1-5-any.pkg.tar.zst" `
-            -OutFile "C:\msys64\tmp-make.pkg.tar.zst"
-      
-          C:\msys64\usr\bin\bash.exe -lc "pacman -U --noconfirm /tmp-make.pkg.tar.zst"
-    
-      - name: Verify Make
-        shell: pwsh
-        run: |
           make --version
+          cmake --version
 
       - name: Build
         shell: cmd

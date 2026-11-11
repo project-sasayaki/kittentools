@@ -28,6 +28,8 @@ if not exist "%USR_BIN%\bash.exe" (
 
 echo [3/4] Installing MinGW32 and required packages...
 "%USR_BIN%\bash.exe" -lc "pacman -Syu --noconfirm"
+:: Make sure it's fully updated
+"%USR_BIN%\bash.exe" -lc "pacman -Syu --noconfirm"
 "%USR_BIN%\bash.exe" -lc "pacman -S --noconfirm mingw-w64-i686-toolchain mingw-w64-i686-cmake make"
 
 echo [4/4] Adding MSYS2 and MinGW32 to User PATH...
