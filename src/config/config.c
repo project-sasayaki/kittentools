@@ -242,7 +242,15 @@ const unsigned int RES_W[8] = {640, 800, 1024, 1280, 800, 1024, 1280, 1360};
 const unsigned int RES_H[8] = {480, 480, 768, 768, 600, 600, 1024, 768};
 void load_config() {
     if (ini_parse(CONFIG_PATH, handler, &Config) < 0)
+    {
+        MessageBox(
+            NULL,
+            "Kittentools is free software and is distributed free of charge.\n\nIf you paid for it, you've been scammed. Please report the seller.",
+            "Warning",
+            MB_ICONWARNING | MB_OK
+        );
         log_error(plfBoot, "Configuration file not found at \"%s\", loading default settings", CONFIG_PATH);
+    }
 
     save_current_config(true);
 

@@ -216,6 +216,7 @@ void __attribute__((regparm(3))) hook_sGLH_GET_EXTPROC_notype(void** param_1, co
 
 void init_idas_prepatch(uint32_t crc)
 {
+    InitAmLibHooks();
     char *gpuName = getGPUVendorName();
     bool isServerBox = false;
 
