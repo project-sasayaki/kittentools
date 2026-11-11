@@ -1,0 +1,56 @@
+
+name: Build
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'src/**'
+  pull_request:
+    branches: [main, master]
+    paths:
+      - 'src/**'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+          
+      - name: Install Dependency
+        shell: cmd
+        run: scripts\install_dependency.bat
+          
+      - name: Install Extra Dependency for Workflow
+        shell: cmd
+        run: |
+          C:\msys64\usr\bin\bash.exe -lc "pacman -S --noconfirm mingw-w64-i686-libsystre"   
+          
+      - name: Verify Toolchain
+        shell: cmd
+        run: |
+          echo "Checking Toolchain..."
+          gcc --version
+          git --version
+          python --version
+          make --version
+          cmake --version
+
+      - name: Build
+        shell: cmd
+        run: scripts\build.bat
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: KittenTools-Windows-x86
+          path: win-release/
+          if-no-files-found: error
