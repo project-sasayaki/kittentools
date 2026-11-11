@@ -272,7 +272,10 @@ int main(int argc, char *argv[], char *envp[])
         gameCrc32 = getCrc32Mem(baseAddr + 10, 0x4000);
     }
 
-    KittenInit(gameCrc32);
+    if (!KittenInit(gameCrc32)) {
+        MessageBox(NULL, "The game executable is unsupported or has been modified.", "Invalid Game Executable", MB_ICONERROR | MB_OK);
+        exit(0);
+    }
 
     int final_argc = 0;
     char *final_argv_arr[10];
