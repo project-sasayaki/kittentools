@@ -8,6 +8,7 @@ KittenTools is a Windows compatibility loader that enables SEGA Lindbergh arcade
 - Initial D Arcade Stage 4 kai Rev.G (SBML)
 - Initial D Arcade Stage 5 Rev.A (SBQZ)
 - Initial D Arcade Stage 5 Rev.C (SBQZ)
+- Initial D Arcade Stage 5 EXP 2.0 Rev.A (SBTS)
 - Wangan Midnight Maximum Tune 3 JPN/EXP (WM3100-1/3 A70)
 - Wangan Midnight Maximum Tune 3DX JPN/EXP (W3X100-1/4 C09)
 - Wangan Midnight Maximum Tune 3DX+ JPN/EXP (W3P100-1/2 B02)
