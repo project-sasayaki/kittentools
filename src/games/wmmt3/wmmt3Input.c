@@ -62,6 +62,8 @@ static int g_gear;          /* 0 neutral, 1..6 */
 static bool g_shiftUpHeld, g_shiftDownHeld;
 static bool g_coinHeld;
 static uint16_t g_coins;
+static int g_gear_buttons[6];
+static bool g_have_gear_bindings;
 
 static uint16_t gear_switches(int gear)
 {
@@ -94,22 +96,11 @@ static void read_switches(struct io3_switch_state *out)
     int directGear = 0;
     bool directGearRead = false;
     if (Config.io3.mode != INPUT_XINPUT) {
-        const int gearButtons[] = {
-            Config.dinput.gear1, Config.dinput.gear2, Config.dinput.gear3,
-            Config.dinput.gear4, Config.dinput.gear5, Config.dinput.gear6
-        };
-        bool haveGearBindings = false;
-        for (size_t i = 0; i < sizeof(gearButtons) / sizeof(gearButtons[0]); i++) {
-            if (gearButtons[i] > 0) {
-                haveGearBindings = true;
-                break;
-            }
-        }
         uint8_t shifterRaw[128];
-        if (haveGearBindings && idas_di_read_shifter_buttons(shifterRaw)) {
+        if (g_have_gear_bindings && idas_di_read_shifter_buttons(shifterRaw)) {
             directGearRead = true;
-            for (size_t i = 0; i < sizeof(gearButtons) / sizeof(gearButtons[0]); i++) {
-                int button = gearButtons[i];
+            for (size_t i = 0; i < sizeof(g_gear_buttons) / sizeof(g_gear_buttons[0]); i++) {
+                int button = g_gear_buttons[i];
                 if (button > 0 && button <= 128 && (shifterRaw[button - 1] & 0x80)) {
                     directGear = (int)i + 1;
                     break;
@@ -251,6 +242,20 @@ const struct idas_io_backend *wmmt3_input_backend(void)
 
 void wmmt3_input_init(void)
 {
+    g_have_gear_bindings = false;
+    g_gear_buttons[0] = Config.dinput.gear1;
+    g_gear_buttons[1] = Config.dinput.gear2;
+    g_gear_buttons[2] = Config.dinput.gear3;
+    g_gear_buttons[3] = Config.dinput.gear4;
+    g_gear_buttons[4] = Config.dinput.gear5;
+    g_gear_buttons[5] = Config.dinput.gear6;
+    for (size_t i = 0; i < sizeof(g_gear_buttons) / sizeof(g_gear_buttons[0]); i++) {
+        if (g_gear_buttons[i] > 0) {
+            g_have_gear_bindings = true;
+            break;
+        }
+    }
+
     initJVS(NAMCO_FCA1);
     getJVSIO()->ops = &g_ops;
     install_calibration();
