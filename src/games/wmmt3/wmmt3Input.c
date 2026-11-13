@@ -30,6 +30,7 @@
 #define BRAKE_MIN 29000
 #define BRAKE_MAX 49480
 #define STEERING_CENTRE 0x7FFF
+#define MAX_GEARS 6
 
 /* The calibration this board is built around; a dump's testmode.lua values
  * leave the pedals half pressed at rest. */
@@ -62,6 +63,8 @@ static int g_gear;          /* 0 neutral, 1..6 */
 static bool g_shiftUpHeld, g_shiftDownHeld;
 static bool g_coinHeld;
 static uint16_t g_coins;
+static int g_gear_buttons[MAX_GEARS];
+static bool g_have_gear_bindings;
 
 static uint16_t gear_switches(int gear)
 {
@@ -86,13 +89,35 @@ static void read_switches(struct io3_switch_state *out)
         g_backend->jvs_read_buttons(&buttons);
         g_backend->jvs_read_shifter(&shifter);
     }
+    uint8_t raw[128];
+    bool haveRaw = Config.io3.mode != INPUT_XINPUT && idas_di_read_buttons(raw);
 
     bool up = shifter & IDAS_IO_GAMEBTN_SHIFTUP;
     bool down = shifter & IDAS_IO_GAMEBTN_SHIFTDN;
-    if (up && !g_shiftUpHeld && g_gear < 6)
-        g_gear++;
-    if (down && !g_shiftDownHeld && g_gear > 0)
-        g_gear--;
+    int directGear = 0;
+    bool directGearRead = false;
+    if (Config.io3.mode != INPUT_XINPUT) {
+        uint8_t shifterRaw[128];
+        if (g_have_gear_bindings && idas_di_read_shifter_buttons(shifterRaw)) {
+            directGearRead = true;
+            for (size_t i = 0; i < MAX_GEARS; i++) {
+                int button = g_gear_buttons[i];
+                if (button > 0 && button <= 128 && (shifterRaw[button - 1] & 0x80)) {
+                    directGear = (int)i + 1;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (directGearRead)
+        g_gear = directGear;
+    else {
+        if (up && !g_shiftUpHeld && g_gear < MAX_GEARS)
+            g_gear++;
+        if (down && !g_shiftDownHeld && g_gear > 0)
+            g_gear--;
+    }
     g_shiftUpHeld = up;
     g_shiftDownHeld = down;
 
@@ -110,8 +135,6 @@ static void read_switches(struct io3_switch_state *out)
         g_gear = 0;
     out->p1 = navigation | gear_switches(g_gear);
 
-    uint8_t raw[128];
-    bool haveRaw = Config.io3.mode != INPUT_XINPUT && idas_di_read_buttons(raw);
 #define WHEEL_BUTTON(n) (haveRaw && (n) > 0 && (n) <= 128 && (raw[(n) - 1] & 0x80))
 
     if ((Config.io3.service && (GetAsyncKeyState(Config.io3.service) & 0x8000)) ||
@@ -220,6 +243,20 @@ const struct idas_io_backend *wmmt3_input_backend(void)
 
 void wmmt3_input_init(void)
 {
+    g_have_gear_bindings = false;
+    g_gear_buttons[0] = Config.dinput.gear1;
+    g_gear_buttons[1] = Config.dinput.gear2;
+    g_gear_buttons[2] = Config.dinput.gear3;
+    g_gear_buttons[3] = Config.dinput.gear4;
+    g_gear_buttons[4] = Config.dinput.gear5;
+    g_gear_buttons[5] = Config.dinput.gear6;
+    for (size_t i = 0; i < MAX_GEARS; i++) {
+        if (g_gear_buttons[i] > 0) {
+            g_have_gear_bindings = true;
+            break;
+        }
+    }
+
     initJVS(NAMCO_FCA1);
     getJVSIO()->ops = &g_ops;
     install_calibration();
