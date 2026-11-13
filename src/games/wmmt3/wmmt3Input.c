@@ -30,6 +30,7 @@
 #define BRAKE_MIN 29000
 #define BRAKE_MAX 49480
 #define STEERING_CENTRE 0x7FFF
+#define MAX_GEARS 6
 
 /* The calibration this board is built around; a dump's testmode.lua values
  * leave the pedals half pressed at rest. */
@@ -62,7 +63,7 @@ static int g_gear;          /* 0 neutral, 1..6 */
 static bool g_shiftUpHeld, g_shiftDownHeld;
 static bool g_coinHeld;
 static uint16_t g_coins;
-static int g_gear_buttons[6];
+static int g_gear_buttons[MAX_GEARS];
 static bool g_have_gear_bindings;
 
 static uint16_t gear_switches(int gear)
@@ -99,7 +100,7 @@ static void read_switches(struct io3_switch_state *out)
         uint8_t shifterRaw[128];
         if (g_have_gear_bindings && idas_di_read_shifter_buttons(shifterRaw)) {
             directGearRead = true;
-            for (size_t i = 0; i < sizeof(g_gear_buttons) / sizeof(g_gear_buttons[0]); i++) {
+            for (size_t i = 0; i < MAX_GEARS; i++) {
                 int button = g_gear_buttons[i];
                 if (button > 0 && button <= 128 && (shifterRaw[button - 1] & 0x80)) {
                     directGear = (int)i + 1;
@@ -112,7 +113,7 @@ static void read_switches(struct io3_switch_state *out)
     if (directGearRead)
         g_gear = directGear;
     else {
-        if (up && !g_shiftUpHeld && g_gear < 6)
+        if (up && !g_shiftUpHeld && g_gear < MAX_GEARS)
             g_gear++;
         if (down && !g_shiftDownHeld && g_gear > 0)
             g_gear--;
@@ -249,7 +250,7 @@ void wmmt3_input_init(void)
     g_gear_buttons[3] = Config.dinput.gear4;
     g_gear_buttons[4] = Config.dinput.gear5;
     g_gear_buttons[5] = Config.dinput.gear6;
-    for (size_t i = 0; i < sizeof(g_gear_buttons) / sizeof(g_gear_buttons[0]); i++) {
+    for (size_t i = 0; i < MAX_GEARS; i++) {
         if (g_gear_buttons[i] > 0) {
             g_have_gear_bindings = true;
             break;
