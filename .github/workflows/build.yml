@@ -52,5 +52,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: KittenTools-Windows-x86
-          path: win-release/
+          path: win-release/kitten.exe
           if-no-files-found: error
