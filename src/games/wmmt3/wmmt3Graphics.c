@@ -10,6 +10,7 @@
 /* glad must come before <GL/gl.h>. */
 #include "../../graphics/internalRes.h"
 #include "../../graphics/msaa.h"
+#include "../../graphics/textureFilter.h"
 #include "wmmt3.h"
 #include "wmmt3Graphics.h"
 #include "../patchlib.h"
@@ -45,9 +46,12 @@ typedef struct
  * renders into a stand-in framebuffer scaled into the window. */
 #define MAX_SCALE_STEPS 3
 
-static int g_gameWidth = 640, g_gameHeight = 480;
-static int g_baseWidth = 640, g_baseHeight = 480;
-static int g_outputWidth = 640, g_outputHeight = 480;
+#define CABINET_WIDTH 640
+#define CABINET_HEIGHT 480
+
+static int g_gameWidth = CABINET_WIDTH, g_gameHeight = CABINET_HEIGHT;
+static int g_baseWidth = CABINET_WIDTH, g_baseHeight = CABINET_HEIGHT;
+static int g_outputWidth = CABINET_WIDTH, g_outputHeight = CABINET_HEIGHT;
 static int g_samples;
 static bool g_stretch;
 static GLuint g_sceneFbo, g_sceneColor, g_sceneDepth;
@@ -57,15 +61,16 @@ static int g_steps;
 
 static bool native_size(void)
 {
-    return g_gameWidth == 640 && g_gameHeight == 480;
+    return g_gameWidth == CABINET_WIDTH && g_gameHeight == CABINET_HEIGHT;
 }
 
 #define MAX_SIDE 8192
 
 void wmmt3_configure_resolution(void)
 {
+    bool cabinetSize = Config.wmmt3.cabinet_resolution;
     int outputWidth, outputHeight;
-    if (Config.display.fullscreen)
+    if (Config.wmmt3.fullscreen)
     {
         DEVMODE dm;
         ZeroMemory(&dm, sizeof(dm));
@@ -74,25 +79,25 @@ void wmmt3_configure_resolution(void)
         outputWidth = (int)dm.dmPelsWidth;
         outputHeight = (int)dm.dmPelsHeight;
     }
-    else if (Config.display.dipsw)
+    else if (cabinetSize)
     {
-        outputWidth = 640;
-        outputHeight = 480;
+        outputWidth = CABINET_WIDTH;
+        outputHeight = CABINET_HEIGHT;
     }
     else
     {
-        outputWidth = Config.display.width;
-        outputHeight = Config.display.height;
+        outputWidth = Config.wmmt3.window_width;
+        outputHeight = Config.wmmt3.window_height;
     }
     if (outputWidth < 320)
         outputWidth = 320;
     if (outputHeight < 240)
         outputHeight = 240;
 
-    if (Config.display.dipsw)
+    if (cabinetSize)
     {
-        g_baseWidth = 640;
-        g_baseHeight = 480;
+        g_baseWidth = CABINET_WIDTH;
+        g_baseHeight = CABINET_HEIGHT;
     }
     else
     {
@@ -105,27 +110,32 @@ void wmmt3_configure_resolution(void)
         }
     }
 
-    int scale = Config.display.render_scale;
-    scale = scale >= 8 ? 8 : scale >= 4 ? 4 : scale >= 2 ? 2 : 1;
+    int wanted = Config.wmmt3.render_scale;
+    int scale = wanted >= 8 ? 8 : wanted >= 4 ? 4 : wanted >= 2 ? 2 : 1;
     while (scale > 1 && (g_baseWidth * scale > MAX_SIDE || g_baseHeight * scale > MAX_SIDE))
         scale /= 2;
-    if (scale != Config.display.render_scale && Config.display.render_scale > 1)
-        log_warn(plfWmmt3, "Resolution: render_scale %d is used as %dx", Config.display.render_scale, scale);
+    if (scale != wanted && wanted > 1)
+        log_warn(plfWmmt3, "Resolution: render_scale %d is used as %dx", wanted, scale);
     g_steps = scale == 8 ? 3 : scale == 4 ? 2 : scale == 2 ? 1 : 0;
     g_gameWidth = g_baseWidth * scale;
     g_gameHeight = g_baseHeight * scale;
-    g_samples = Config.display.msaa_samples > 0 ? Config.display.msaa_samples : 0;
-
-    Config.display.render_scale = 1;
-    Config.display.msaa_samples = 0;
-    irInit();
-    msInit();
-
+    g_samples = Config.wmmt3.msaa_samples > 0 ? Config.wmmt3.msaa_samples : 0;
     g_outputWidth = outputWidth;
     g_outputHeight = outputHeight;
     g_stretch = Config.wmmt3.stretch;
+
+    /* The window and the texture filter are shared with other games and read [display];
+     * scaling and multisampling are done here, so the shared ones stay off. */
+    Config.display.fullscreen = Config.wmmt3.fullscreen;
+    Config.display.borderless = Config.wmmt3.borderless;
     Config.display.width = outputWidth;
     Config.display.height = outputHeight;
+    Config.display.render_scale = 1;
+    Config.display.msaa_samples = 0;
+    Config.display.anisotropic = Config.wmmt3.anisotropic;
+    irInit();
+    msInit();
+    tfInit();
     log_info(plfWmmt3, "Resolution: the game renders at %dx%d, shown at %dx%d in %dx%d%s", g_gameWidth,
              g_gameHeight, g_baseWidth, g_baseHeight, outputWidth, outputHeight,
              g_baseWidth == outputWidth && g_baseHeight == outputHeight ? ""
@@ -352,10 +362,10 @@ static void hook_setViewport(void *self, int x, int y, int width, int height, fl
 {
     if (g_inMiniMap && width == 88 && height == 82)
     {
-        x = scale_to(x, g_gameWidth, 640);
-        y = scale_to(y, g_gameHeight, 480);
-        width = scale_to(width, g_gameWidth, 640);
-        height = scale_to(height, g_gameHeight, 480);
+        x = scale_to(x, g_gameWidth, CABINET_WIDTH);
+        y = scale_to(y, g_gameHeight, CABINET_HEIGHT);
+        width = scale_to(width, g_gameWidth, CABINET_WIDTH);
+        height = scale_to(height, g_gameHeight, CABINET_HEIGHT);
     }
     next_setViewport(self, x, y, width, height, nearPlane, farPlane);
 }
@@ -555,7 +565,7 @@ static void dump_frame_if_asked(unsigned frame, GLenum buffer, const char *tag)
     if (every <= 0 || frame == 0 || frame % (unsigned)every != 0)
         return;
 
-    int width = Config.display.width, height = Config.display.height;
+    int width = g_outputWidth, height = g_outputHeight;
     size_t rowBytes = (size_t)width * 3;
     size_t padded = (rowBytes + 3) & ~(size_t)3;
     uint8_t *pixels = (uint8_t *)malloc(padded * (size_t)height);

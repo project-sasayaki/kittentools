@@ -280,6 +280,7 @@ void symres_enable_guest_runtime(void)
     symbol_register("_Unwind_FindEnclosingFunction", (void *)_Unwind_FindEnclosingFunction, NULL);
 
     libcExtra_trace_cxx_throws();
+    libcExtra_guest_wide_strings();
 
     log_info(plfSymbolResolv, "Guest C++ runtime enabled (static libgcc unwinder)");
 }

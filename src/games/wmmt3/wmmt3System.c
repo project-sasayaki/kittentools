@@ -9,6 +9,8 @@
 #include <string.h>
 
 #include "wmmt3System.h"
+#include "wmmt3Network.h"
+#include "../../config/config.h"
 #include "../../hooks/file.h"
 #include "../../log/log.h"
 
@@ -63,6 +65,26 @@ static bool has_suffix(const char *name, const char *suffix)
     return n >= s && strcmp(name + n - s, suffix) == 0;
 }
 
+static int write_ifconfig(const char *outputPath, int index, const unsigned char address[4],
+                          const unsigned char mask[4], const unsigned char mac[6], int link)
+{
+    FILE *out = open_guest_output(outputPath);
+    if (!out)
+        return 1;
+    fprintf(out, "%d", index);
+    for (int i = 0; i < 4; ++i)
+        fprintf(out, " %d", address[i]);
+    for (int i = 0; i < 4; ++i)
+        fprintf(out, " %d", mask[i]);
+    for (int i = 0; i < 6; ++i)
+        fprintf(out, " %d", mac[i]);
+    fprintf(out, " %d\n", link);
+    fclose(out);
+
+    log_info(plfWmmt3, "Reported interface %d.%d.%d.%d to the cabinet", address[0], address[1], address[2], address[3]);
+    return 0;
+}
+
 /* "$interface @address @mask @mac $link" */
 static int answer_ifconfig(const char *outputPath)
 {
@@ -70,6 +92,14 @@ static int answer_ifconfig(const char *outputPath)
     unsigned char address[4] = {127, 0, 0, 1};
     unsigned char mask[4] = {255, 0, 0, 0};
     unsigned char mac[6] = {0};
+
+    if (Config.wmmt3.linked_play)
+    {
+        /* As ifconfig.pl prints a cabinet whose eth0 has no address. */
+        Wmmt3Interface nic = {.mask = {255, 255, 255, 0}};
+        wmmt3_network_interface(&nic);
+        return write_ifconfig(outputPath, index, nic.address, nic.mask, nic.mac, nic.link);
+    }
 
     ULONG size = 0;
     GetAdaptersInfo(NULL, &size);
@@ -94,21 +124,7 @@ static int answer_ifconfig(const char *outputPath)
     }
     free(adapters);
 
-    FILE *out = open_guest_output(outputPath);
-    if (!out)
-        return 1;
-    fprintf(out, "%d", index);
-    for (int i = 0; i < 4; ++i)
-        fprintf(out, " %d", address[i]);
-    for (int i = 0; i < 4; ++i)
-        fprintf(out, " %d", mask[i]);
-    for (int i = 0; i < 6; ++i)
-        fprintf(out, " %d", mac[i]);
-    fprintf(out, " %d\n", link);
-    fclose(out);
-
-    log_info(plfWmmt3, "Reported interface %d.%d.%d.%d to the cabinet", address[0], address[1], address[2], address[3]);
-    return 0;
+    return write_ifconfig(outputPath, index, address, mask, mac, link);
 }
 
 static int answer_usbsize(const char *outputPath)

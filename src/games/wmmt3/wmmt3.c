@@ -18,6 +18,7 @@
 #include "../../audio/openal/openal.h"
 #include "wmmt3Hasp.h"
 #include "wmmt3Disk.h"
+#include "wmmt3Network.h"
 #include "../patchlib.h"
 #include <MinHook.h>
 
@@ -56,26 +57,6 @@ static const WMMT3_InitialData WMMT3DXP_JPN_Data = {
     .verName = "Wangan Midnight Maximum Tune 3DX+ (JPN)",
     .windowTitle = "WANGAN MIDNIGHT MAXIMUM TUNE 3DX PLUS",
 };
-
-/* FREE PLAY: answer clTestMode::isFreePlay. */
-static void install_free_play(void)
-{
-    if (!Config.Coins.freeplay)
-        return;
-    if (!wmmt3_hook("_ZNK10clTestMode10isFreePlayEv", (void *)stubRetOne, NULL))
-    {
-        log_warn(plfWmmt3, "Free play: clTestMode::isFreePlay not found; using the game's own setting");
-        return;
-    }
-    log_info(plfWmmt3, "Free play: on ([Coins] freeplay)");
-}
-
-/* Linked play is not emulated: report the network down so the boot never waits at the link check. */
-static void install_standalone_boot(void)
-{
-    if (!wmmt3_hook("_ZN5clNet5isRunEv", (void *)stubRetZero, NULL))
-        log_warn(plfWmmt3, "Stand-alone boot: clNet::isRun not found; the link check may wait forever");
-}
 
 static const WMMT3_InitialData WMMT3DX_EXP_C09_Data = {
     .gameID = "W3X100-4-NA-DAT0-C09",
@@ -121,6 +102,26 @@ bool is_wmmt3_crc(uint32_t crc)
     return false;
 }
 
+/* Answers clTestMode::isFreePlay. */
+static void install_free_play(void)
+{
+    if (!Config.wmmt3.free_play)
+        return;
+    if (!wmmt3_hook("_ZNK10clTestMode10isFreePlayEv", (void *)stubRetOne, NULL))
+    {
+        log_warn(plfWmmt3, "Free play: clTestMode::isFreePlay not found; using the game's own setting");
+        return;
+    }
+    log_info(plfWmmt3, "Free play: on (free_play)");
+}
+
+/* Without linked play, report the network down so the boot never waits at the link check. */
+static void install_standalone_boot(void)
+{
+    if (!wmmt3_hook("_ZN5clNet5isRunEv", (void *)stubRetZero, NULL))
+        log_warn(plfWmmt3, "Stand-alone boot: clNet::isRun not found; the link check may wait forever");
+}
+
 void init_wmmt3_prepatch(uint32_t crc)
 {
     for (size_t i = 0; i < ARRAYSIZE(g_WMMT3Versions); ++i)
@@ -155,6 +156,9 @@ void init_wmmt3_prepatch(uint32_t crc)
     install_free_play();
     openal_install_hooks(Config.wmmt3.openal_dll);
     wmmt3_install_disk_model();
-    install_standalone_boot();
+    if (Config.wmmt3.linked_play)
+        wmmt3_network_init();
+    else
+        install_standalone_boot();
     wmmt3_install_hasp();
 }

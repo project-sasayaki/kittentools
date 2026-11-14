@@ -504,3 +504,15 @@ static void idas_xi_ffb_rumble(uint8_t period, uint8_t force) {
 static void idas_xi_ffb_damper(uint8_t force) {
     return;
 }
+
+uint32_t idas_xi_button_mask(const char *spec, const char *key)
+{
+    return idas_xi_parse_button_map(spec, key);
+}
+
+bool idas_xi_button_held(uint32_t mask)
+{
+    XINPUT_STATE xi;
+
+    return mask != 0 && idas_xi_get_state(&xi) && idas_xi_map_pressed(&xi.Gamepad, mask);
+}

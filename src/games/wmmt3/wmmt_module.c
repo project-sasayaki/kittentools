@@ -1,22 +1,11 @@
-#define WIN32_LEAN_AND_MEAN
-#include <stdio.h>
-#include <stdint.h>
-#include <MinHook.h>
-
 #include "wmmt3.h"
 #include "../../init.h"
 #include "../games.h"
-#include "../config/config.h"
-#include "../devices/baseBoard.h"
-#include "../devices/motorboard.h"
-#include "../devices/eeprom.h"
-#include "../devices/device.h"
-#include "../devices/strpcb.h"
-#include "../devices/namcoJvio.h"
-#include "../devices/namcoCardReader.h"
-#include "../graphics/gpuVendor.h"
-#include "../config/config.h"
-#include "../log/log.h"
+#include "../../devices/device.h"
+#include "../../devices/strpcb.h"
+#include "../../devices/namcoJvio.h"
+#include "../../devices/namcoCardReader.h"
+#include "../../log/log.h"
 
 static void wmmt3_init(void)
 {
