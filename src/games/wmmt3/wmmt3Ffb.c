@@ -75,7 +75,7 @@ static DWORD WINAPI ffb_worker(void *unused)
 
 static void on_frame(const uint8_t frame[10])
 {
-    if (!Config.ffb.enable || !g_started)
+    if (!g_started)
         return;
 
     int spring = frame[4];
@@ -118,7 +118,7 @@ void wmmt3_ffb_init(void)
         backend->ffb_init();
     strpcb_set_frame_sink(on_frame);
 
-    if (backend && Config.ffb.enable)
+    if (backend && Config.wmmt3.ffb_enable)
     {
         InitializeCriticalSection(&g_lock);
         g_wake = CreateEvent(NULL, FALSE, FALSE, NULL);

@@ -35,4 +35,6 @@ void  elf_run_guest_initializers(void);
 void *elf_lookup_guest_library_symbol(const char *name);
 
 size_t elf_patch_writable_code_stubs(const char *prefix, void *(*resolver)(const char *name));
+/* Replace an imported function in every loaded module after load; returns the implementation it replaced. */
+void *elf_interpose_import(const char *name, void *replacement);
 int hook_ret_zero(void);

@@ -88,6 +88,17 @@ void libcExtra_trace_cxx_throws(void)
     symbol_register("__cxa_throw", kt_cxa_throw, NULL);
 }
 
+/* The guest's wchar_t is 32 bits wide; the host's wmemmove counts 16-bit units. */
+static uint32_t *kt_wmemmove(uint32_t *dst, const uint32_t *src, size_t n)
+{
+    return memmove(dst, src, n * sizeof(uint32_t));
+}
+
+void libcExtra_guest_wide_strings(void)
+{
+    symbol_register("wmemmove", kt_wmemmove, NULL);
+}
+
 #define CTYPE_WRAPPER(name)                                                    \
     static int kt_##name(int c) { return (c >= 0 && c < 256) ? name(c) : 0; }
 CTYPE_WRAPPER(isalnum)

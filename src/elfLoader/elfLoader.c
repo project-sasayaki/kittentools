@@ -411,6 +411,81 @@ size_t elf_patch_writable_code_stubs(const char *prefix, void *(*resolver)(const
     return patched;
 }
 
+static size_t interpose_import_in(ElfLoader *loader, const char *name, uint32_t previous, uint32_t replacement)
+{
+    ElfFile *elf = &loader->elf;
+    size_t patched = 0;
+
+    for (size_t i = 0; i < get_section_count(elf); ++i)
+    {
+        const Elf32_Shdr *sec = get_section(elf, i);
+        const Elf32_Rel *relArr = NULL;
+        const Elf32_Rela *relaArr = NULL;
+        size_t relCount = 0;
+        if (sec->sh_type == SHT_REL)
+            relArr = get_rel_array(elf, sec, &relCount);
+        else if (sec->sh_type == SHT_RELA)
+            relaArr = get_rela_array(elf, sec, &relCount);
+        if (!relArr && !relaArr)
+            continue;
+
+        size_t symCount = 0;
+        const char *strTab = NULL;
+        size_t strTabSize = 0;
+        const Elf32_Shdr *symSec = get_section(elf, sec->sh_link);
+        const Elf32_Sym *symArr = symSec ? get_symbol_array(elf, symSec, &symCount, &strTab, &strTabSize) : NULL;
+        if (!symArr || !strTab)
+            continue;
+
+        for (size_t j = 0; j < relCount; ++j)
+        {
+            uint32_t offset = relArr ? relArr[j].r_offset : relaArr[j].r_offset;
+            uint32_t info = relArr ? relArr[j].r_info : relaArr[j].r_info;
+            uint32_t symbolIdx = ELF32_R_SYM(info);
+            if (symbolIdx >= symCount || symArr[symbolIdx].st_name == 0 || symArr[symbolIdx].st_name >= strTabSize ||
+                strcmp(strTab + symArr[symbolIdx].st_name, name) != 0)
+                continue;
+
+            uint32_t *slot = (uint32_t *)(uintptr_t)(offset + loader->loadBias);
+            switch (ELF32_R_TYPE(info))
+            {
+                case R_386_GLOB_DAT:
+                case R_386_JMP_SLOT:
+                    *slot = replacement;
+                    ++patched;
+                    break;
+                case R_386_32:
+                case R_386_PC32:
+                    /* The addend is already folded into the slot. */
+                    *slot += replacement - previous;
+                    ++patched;
+                    break;
+                default:
+                    break;
+            }
+        }
+    }
+    return patched;
+}
+
+/* Symbols resolve while the ELF loads, before the game module is known. */
+void *elf_interpose_import(const char *name, void *replacement)
+{
+    if (!g_MainLoader || !name || !replacement)
+        return NULL;
+
+    void *previous = symres_resolve_symbol(name);
+    size_t patched = interpose_import_in(g_MainLoader, name, (uint32_t)(uintptr_t)previous,
+                                         (uint32_t)(uintptr_t)replacement);
+    for (size_t i = 0; i < g_GuestLibCount; ++i)
+        patched += interpose_import_in(g_GuestLibs[i], name, (uint32_t)(uintptr_t)previous,
+                                       (uint32_t)(uintptr_t)replacement);
+
+    symbol_register(name, replacement, NULL);
+    log_debug(plfELFLoader, "Interposed %s: %zu reference(s) now point at %p", name, patched, replacement);
+    return previous;
+}
+
 void *elf_lookup_guest_library_symbol(const char *name)
 {
     for (size_t i = 0; i < g_GuestInitCount; ++i)
