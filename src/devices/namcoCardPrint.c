@@ -7,7 +7,6 @@
 
 #include "namcoCardPrint.h"
 #include "../config/config.h"
-#include "../games/wmmt3/wmmt3Config.h"
 #include "../log/log.h"
 
 #define IMAGE_WIDTH 640
@@ -73,7 +72,7 @@ static const char *font_name(void)
     if (!loaded)
     {
         loaded = true;
-        const char *file = Wmmt3Config.print_font_file;
+        const char *file = Config.wmmt3.print_font_file;
         if (file && *file)
         {
             if (AddFontResourceExA(file, FR_PRIVATE, NULL) > 0)
@@ -82,7 +81,7 @@ static const char *font_name(void)
                 log_warn(plfMisc, "Card print: could not load %s, using an installed font", file);
         }
     }
-    const char *name = Wmmt3Config.print_font_name;
+    const char *name = Config.wmmt3.print_font_name;
     return name && *name ? name : "MS Gothic";
 }
 
@@ -225,7 +224,7 @@ static void render(const char *pngPath)
     {
         void *output = text;
         void *card = NULL;
-        const char *templatePath = Wmmt3Config.print_template;
+        const char *templatePath = Config.wmmt3.print_template;
         if (templatePath && *templatePath)
         {
             WCHAR wideTemplate[MAX_PATH];

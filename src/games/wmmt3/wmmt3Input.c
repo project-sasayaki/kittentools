@@ -2,12 +2,12 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <stdbool.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "wmmt3.h"
 #include "wmmt3Input.h"
 #include "../../config/config.h"
-#include "wmmt3Config.h"
 #include "../../devices/jvs.h"
 #include "../../devices/namcoCardReader.h"
 #include "../../input/backend.h"
@@ -72,7 +72,7 @@ static bool g_have_gear_bindings;
 
 static bool gamepad(void)
 {
-    return Wmmt3Config.input_mode == INPUT_XINPUT;
+    return Config.wmmt3.input_mode == INPUT_XINPUT;
 }
 
 static bool key_down(int virtualKey)
@@ -109,11 +109,14 @@ static void read_switches(struct io3_switch_state *out)
         g_backend->jvs_read_buttons(&buttons);
         g_backend->jvs_read_shifter(&shifter);
     }
+    uint8_t raw[128];
+    bool haveRaw = Config.io3.mode != INPUT_XINPUT && idas_di_read_buttons(raw);
+
     bool up = shifter & IDAS_IO_GAMEBTN_SHIFTUP;
     bool down = shifter & IDAS_IO_GAMEBTN_SHIFTDN;
     int directGear = 0;
     bool directGearRead = false;
-    if (!gamepad()) {
+    if (Config.io3.mode != INPUT_XINPUT) {
         uint8_t shifterRaw[128];
         if (g_have_gear_bindings && idas_di_read_shifter_buttons(shifterRaw)) {
             directGearRead = true;
@@ -155,19 +158,19 @@ static void read_switches(struct io3_switch_state *out)
     uint8_t held[WHEEL_BUTTONS];
     const uint8_t *wheel = !gamepad() && idas_di_read_buttons(held) ? held : NULL;
 
-    if (key_down(Wmmt3Config.service_key) || wheel_button(wheel, Wmmt3Config.dinput_service))
+    if (key_down(Config.wmmt3.service_key) || wheel_button(wheel, Config.wmmt3.dinput_service))
         out->p1 |= SW_SERVICE;
-    if (key_down(Wmmt3Config.intrude_key) || wheel_button(wheel, Wmmt3Config.dinput_intrude) ||
+    if (key_down(Config.wmmt3.intrude_key) || wheel_button(wheel, Config.wmmt3.dinput_intrude) ||
         idas_xi_button_held(g_intrudePad))
         out->p1 |= SW_INTRUDE;
     if (buttons & IDAS_IO_GAMEBTN_VIEW_CHANGE)
         out->p1 |= SW_VIEW;
 
-    if (key_down(Wmmt3Config.test_key) || wheel_button(wheel, Wmmt3Config.dinput_test))
+    if (key_down(Config.wmmt3.test_key) || wheel_button(wheel, Config.wmmt3.dinput_test))
         out->system = SYSTEM_TEST;
 
     static bool cardHeld;
-    bool card = key_down(Wmmt3Config.card_key) || wheel_button(wheel, Wmmt3Config.dinput_card);
+    bool card = key_down(Config.wmmt3.card_key) || wheel_button(wheel, Config.wmmt3.dinput_card);
     if (card && !cardHeld)
         namcoCardReaderRequestInsert();
     cardHeld = card;
@@ -189,7 +192,26 @@ static void read_analogs(uint16_t *analogs, uint8_t count)
     if (g_backend)
         g_backend->jvs_read_analogs(&state);
 
-    int wheel = 0x8000 + (state.wheel * Wmmt3Config.steering_range) / STEERING_FULL_RANGE;
+    /* KITTEN_WMMT3_KEYBOARD=1 */
+    static int keyboard = -1;
+    if (keyboard < 0)
+    {
+        const char *value = getenv("KITTEN_WMMT3_KEYBOARD");
+        keyboard = value && *value == '1';
+    }
+    if (keyboard)
+    {
+        if (GetAsyncKeyState(VK_UP) & 0x8000)
+            state.accel = (int16_t)0xFFFF;
+        if (GetAsyncKeyState(VK_DOWN) & 0x8000)
+            state.brake = (int16_t)0xFFFF;
+        if (GetAsyncKeyState(VK_LEFT) & 0x8000)
+            state.wheel = -24000;
+        if (GetAsyncKeyState(VK_RIGHT) & 0x8000)
+            state.wheel = 24000;
+    }
+
+    int wheel = 0x8000 + (state.wheel * Config.wmmt3.steering_range) / STEERING_FULL_RANGE;
     if (wheel < 0)
         wheel = 0;
     if (wheel > 0xFFFF)
@@ -216,7 +238,7 @@ static void read_coin_counter(uint8_t slot, uint16_t *out)
     uint8_t system = 0;
     if (g_backend && g_backend->jvs_read_system)
         g_backend->jvs_read_system(&system);
-    bool pressed = (system & IDAS_IO_SYSBTN_COIN) || key_down(Wmmt3Config.coin_key);
+    bool pressed = (system & IDAS_IO_SYSBTN_COIN) || key_down(Config.wmmt3.coin_key);
     if (pressed && !g_coinHeld)
         g_coins++;
     g_coinHeld = pressed;
@@ -234,65 +256,63 @@ const struct idas_io_backend *wmmt3_input_backend(void)
     return g_backend;
 }
 
-/* The gamepad backend is shared with other games and reads [xinput]. Its up, down, left and right
- * reach read_switches() as the shifter's gate switches; the cabinet has no start button. */
+/* The gamepad backend is shared with other games and reads [xinput]. */
 static void configure_gamepad(void)
 {
-    Config.xinput.deviceIndex = Wmmt3Config.xinput_device;
-    Config.xinput.start = "none";
-    Config.xinput.viewChg = Wmmt3Config.xinput_view_change;
-    Config.xinput.up = Wmmt3Config.xinput_lever_up;
-    Config.xinput.down = Wmmt3Config.xinput_lever_down;
-    Config.xinput.left = Wmmt3Config.xinput_lever_left;
-    Config.xinput.right = Wmmt3Config.xinput_lever_right;
-    Config.xinput.shiftDn = Wmmt3Config.xinput_shift_down;
-    Config.xinput.shiftUp = Wmmt3Config.xinput_shift_up;
-    Config.xinput.accel = Wmmt3Config.xinput_accel;
-    Config.xinput.brake = Wmmt3Config.xinput_brake;
-    Config.xinput.coin = Wmmt3Config.xinput_coin;
-    Config.xinput.singleStickSteering = Wmmt3Config.xinput_single_stick_steering;
-    Config.xinput.linearSteering = Wmmt3Config.xinput_linear_steering;
-    Config.xinput.steeringExponent = Wmmt3Config.xinput_steering_exponent;
-    Config.xinput.leftStickDeadzone = Wmmt3Config.xinput_left_deadzone;
-    Config.xinput.rightStickDeadzone = Wmmt3Config.xinput_right_deadzone;
+    Config.xinput.deviceIndex = Config.wmmt3.xinput_device;
+    Config.xinput.start = Config.wmmt3.xinput_start;
+    Config.xinput.viewChg = Config.wmmt3.xinput_view_change;
+    Config.xinput.up = Config.wmmt3.xinput_up;
+    Config.xinput.down = Config.wmmt3.xinput_down;
+    Config.xinput.left = Config.wmmt3.xinput_left;
+    Config.xinput.right = Config.wmmt3.xinput_right;
+    Config.xinput.shiftDn = Config.wmmt3.xinput_shift_down;
+    Config.xinput.shiftUp = Config.wmmt3.xinput_shift_up;
+    Config.xinput.accel = Config.wmmt3.xinput_accel;
+    Config.xinput.brake = Config.wmmt3.xinput_brake;
+    Config.xinput.coin = Config.wmmt3.xinput_coin;
+    Config.xinput.singleStickSteering = Config.wmmt3.xinput_single_stick_steering;
+    Config.xinput.linearSteering = Config.wmmt3.xinput_linear_steering;
+    Config.xinput.steeringExponent = Config.wmmt3.xinput_steering_exponent;
+    Config.xinput.leftStickDeadzone = Config.wmmt3.xinput_left_deadzone;
+    Config.xinput.rightStickDeadzone = Config.wmmt3.xinput_right_deadzone;
 }
 
-/* The steering wheel backend is shared with other games and reads [dinput] and [ffb]. As on the
- * gamepad, its up, down, left and right are the shifter lever, and there is no start button. */
+/* The steering wheel backend is shared with other games and reads [dinput] and [ffb]. */
 static void configure_wheel(void)
 {
-    Config.dinput.deviceName = Wmmt3Config.dinput_wheel;
-    Config.dinput.pedalsName = Wmmt3Config.dinput_pedals;
-    Config.dinput.shifterName = Wmmt3Config.dinput_shifter;
-    Config.dinput.accelAxis = Wmmt3Config.dinput_accel_axis;
-    Config.dinput.brakeAxis = Wmmt3Config.dinput_brake_axis;
-    Config.dinput.reverseAccelAxis = Wmmt3Config.dinput_reverse_accel_axis;
-    Config.dinput.reverseBrakeAxis = Wmmt3Config.dinput_reverse_brake_axis;
-    Config.dinput.start = 0;
-    Config.dinput.viewChg = Wmmt3Config.dinput_view_change;
-    Config.dinput.shiftDn = Wmmt3Config.dinput_shift_down;
-    Config.dinput.shiftUp = Wmmt3Config.dinput_shift_up;
-    Config.dinput.up = Wmmt3Config.dinput_lever_up;
-    Config.dinput.down = Wmmt3Config.dinput_lever_down;
-    Config.dinput.left = Wmmt3Config.dinput_lever_left;
-    Config.dinput.right = Wmmt3Config.dinput_lever_right;
-    Config.dinput.coin = Wmmt3Config.dinput_coin;
+    Config.dinput.deviceName = Config.wmmt3.dinput_wheel;
+    Config.dinput.pedalsName = Config.wmmt3.dinput_pedals;
+    Config.dinput.shifterName = Config.wmmt3.dinput_shifter;
+    Config.dinput.accelAxis = Config.wmmt3.dinput_accel_axis;
+    Config.dinput.brakeAxis = Config.wmmt3.dinput_brake_axis;
+    Config.dinput.reverseAccelAxis = Config.wmmt3.dinput_reverse_accel_axis;
+    Config.dinput.reverseBrakeAxis = Config.wmmt3.dinput_reverse_brake_axis;
+    Config.dinput.start = Config.wmmt3.dinput_start;
+    Config.dinput.viewChg = Config.wmmt3.dinput_view_change;
+    Config.dinput.shiftDn = Config.wmmt3.dinput_shift_down;
+    Config.dinput.shiftUp = Config.wmmt3.dinput_shift_up;
+    Config.dinput.up = Config.wmmt3.dinput_up;
+    Config.dinput.down = Config.wmmt3.dinput_down;
+    Config.dinput.left = Config.wmmt3.dinput_left;
+    Config.dinput.right = Config.wmmt3.dinput_right;
+    Config.dinput.coin = Config.wmmt3.dinput_coin;
 
-    Config.ffb.constantForceStrength = Wmmt3Config.ffb_constant_force;
-    Config.ffb.damperStrength = Wmmt3Config.ffb_damper;
-    Config.ffb.baseDamperStrength = Wmmt3Config.ffb_base_damper;
-    Config.ffb.deadBand = Wmmt3Config.ffb_dead_band;
+    Config.ffb.constantForceStrength = Config.wmmt3.ffb_constant_force;
+    Config.ffb.damperStrength = Config.wmmt3.ffb_damper;
+    Config.ffb.baseDamperStrength = Config.wmmt3.ffb_base_damper;
+    Config.ffb.deadBand = Config.wmmt3.ffb_dead_band;
 }
 
 void wmmt3_input_init(void)
 {
     g_have_gear_bindings = false;
-    g_gear_buttons[0] = Wmmt3Config.dinput_gear1;
-    g_gear_buttons[1] = Wmmt3Config.dinput_gear2;
-    g_gear_buttons[2] = Wmmt3Config.dinput_gear3;
-    g_gear_buttons[3] = Wmmt3Config.dinput_gear4;
-    g_gear_buttons[4] = Wmmt3Config.dinput_gear5;
-    g_gear_buttons[5] = Wmmt3Config.dinput_gear6;
+    g_gear_buttons[0] = Config.dinput.gear1;
+    g_gear_buttons[1] = Config.dinput.gear2;
+    g_gear_buttons[2] = Config.dinput.gear3;
+    g_gear_buttons[3] = Config.dinput.gear4;
+    g_gear_buttons[4] = Config.dinput.gear5;
+    g_gear_buttons[5] = Config.dinput.gear6;
     for (size_t i = 0; i < MAX_GEARS; i++) {
         if (g_gear_buttons[i] > 0) {
             g_have_gear_bindings = true;
@@ -308,7 +328,7 @@ void wmmt3_input_init(void)
     {
         configure_gamepad();
         idas_xi_init(&g_backend);
-        g_intrudePad = idas_xi_button_mask(Wmmt3Config.xinput_intrude, "[wmmt3] xinput_intrude");
+        g_intrudePad = idas_xi_button_mask(Config.wmmt3.xinput_intrude, "[wmmt3] xinput_intrude");
     }
     else
     {

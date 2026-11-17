@@ -11,7 +11,6 @@
 #include "wmmt3System.h"
 #include "wmmt3Network.h"
 #include "../../config/config.h"
-#include "wmmt3Config.h"
 #include "../../hooks/file.h"
 #include "../../log/log.h"
 
@@ -94,7 +93,7 @@ static int answer_ifconfig(const char *outputPath)
     unsigned char mask[4] = {255, 0, 0, 0};
     unsigned char mac[6] = {0};
 
-    if (Wmmt3Config.linked_play)
+    if (Config.wmmt3.linked_play)
     {
         /* As ifconfig.pl prints a cabinet whose eth0 has no address. */
         Wmmt3Interface nic = {.mask = {255, 255, 255, 0}};

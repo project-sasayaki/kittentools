@@ -221,6 +221,11 @@ static double kt_log2(double x) { return log2(x); }
 static int kt_isinf(double x) { return isinf(x) ? (x > 0 ? 1 : -1) : 0; }
 static int kt_isnan(double x) { return isnan(x) ? 1 : 0; }
 
+static long kt_random(void)
+{
+    return ((long)rand() << 16 ^ (long)rand()) & 0x7fffffff;
+}
+
 static void kt_bzero(void *p, size_t n) { memset(p, 0, n); }
 
 static char *kt_strerror_r(int errnum, char *buf, size_t len)
@@ -1128,6 +1133,7 @@ void libcExtraBridge_initBridges(void)
     symbol_register("log2", kt_log2, NULL);
     symbol_register("isinf", kt_isinf, NULL);
     symbol_register("isnan", kt_isnan, NULL);
+    symbol_register("random", kt_random, NULL);
     symbol_register("qsort", qsort, NULL);
     symbol_register("bzero", kt_bzero, NULL);
     symbol_register("strerror_r", kt_strerror_r, NULL);

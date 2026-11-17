@@ -15,7 +15,6 @@
 #include "wmmt3Graphics.h"
 #include "../patchlib.h"
 #include "../../config/config.h"
-#include "wmmt3Config.h"
 #include "../../elfLoader/elfLoader.h"
 #include "../../elfLoader/glHooks.h"
 #include "../../elfLoader/symbol.h"
@@ -69,9 +68,9 @@ static bool native_size(void)
 
 void wmmt3_configure_resolution(void)
 {
-    bool cabinetSize = Wmmt3Config.cabinet_resolution;
+    bool cabinetSize = Config.wmmt3.cabinet_resolution;
     int outputWidth, outputHeight;
-    if (Wmmt3Config.fullscreen)
+    if (Config.wmmt3.fullscreen)
     {
         DEVMODE dm;
         ZeroMemory(&dm, sizeof(dm));
@@ -87,8 +86,8 @@ void wmmt3_configure_resolution(void)
     }
     else
     {
-        outputWidth = Wmmt3Config.window_width;
-        outputHeight = Wmmt3Config.window_height;
+        outputWidth = Config.wmmt3.window_width;
+        outputHeight = Config.wmmt3.window_height;
     }
     if (outputWidth < 320)
         outputWidth = 320;
@@ -111,7 +110,7 @@ void wmmt3_configure_resolution(void)
         }
     }
 
-    int wanted = Wmmt3Config.render_scale;
+    int wanted = Config.wmmt3.render_scale;
     int scale = wanted >= 8 ? 8 : wanted >= 4 ? 4 : wanted >= 2 ? 2 : 1;
     while (scale > 1 && (g_baseWidth * scale > MAX_SIDE || g_baseHeight * scale > MAX_SIDE))
         scale /= 2;
@@ -120,20 +119,20 @@ void wmmt3_configure_resolution(void)
     g_steps = scale == 8 ? 3 : scale == 4 ? 2 : scale == 2 ? 1 : 0;
     g_gameWidth = g_baseWidth * scale;
     g_gameHeight = g_baseHeight * scale;
-    g_samples = Wmmt3Config.msaa_samples > 0 ? Wmmt3Config.msaa_samples : 0;
+    g_samples = Config.wmmt3.msaa_samples > 0 ? Config.wmmt3.msaa_samples : 0;
     g_outputWidth = outputWidth;
     g_outputHeight = outputHeight;
-    g_stretch = Wmmt3Config.stretch;
+    g_stretch = Config.wmmt3.stretch;
 
     /* The window and the texture filter are shared with other games and read [display];
      * scaling and multisampling are done here, so the shared ones stay off. */
-    Config.display.fullscreen = Wmmt3Config.fullscreen;
-    Config.display.borderless = Wmmt3Config.borderless;
+    Config.display.fullscreen = Config.wmmt3.fullscreen;
+    Config.display.borderless = Config.wmmt3.borderless;
     Config.display.width = outputWidth;
     Config.display.height = outputHeight;
     Config.display.render_scale = 1;
     Config.display.msaa_samples = 0;
-    Config.display.anisotropic = Wmmt3Config.anisotropic;
+    Config.display.anisotropic = Config.wmmt3.anisotropic;
     irInit();
     msInit();
     tfInit();

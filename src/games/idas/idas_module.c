@@ -70,10 +70,7 @@ static const GameModule IDAS_Module = {
     .name = "IDAS",
     .detect = init_idas_detect,
     .init = init_idas,
-    .prepatch = init_idas_prepatch,
-    .sharedConfig = CONFIG_GROUP_DISPLAY | CONFIG_GROUP_NETWORK | CONFIG_GROUP_SYSCONF |
-                    CONFIG_GROUP_COINS | CONFIG_GROUP_PATH | CONFIG_GROUP_IO3 | CONFIG_GROUP_FFB |
-                    CONFIG_GROUP_XINPUT | CONFIG_GROUP_DINPUT,
+    .prepatch = init_idas_prepatch
 };
 
 MODULE_REGISTER(IDAS_Module);

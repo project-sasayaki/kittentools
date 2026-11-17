@@ -1,5 +1,4 @@
 #include "wmmt3.h"
-#include "wmmt3Config.h"
 #include "../../init.h"
 #include "../games.h"
 #include "../../devices/device.h"
@@ -66,9 +65,7 @@ static const GameModule WMMT3_Module = {
     .name = "WMMT3",
     .detect = is_wmmt3_crc,
     .init = wmmt3_init,
-    .prepatch = init_wmmt3_prepatch,
-    .config = &Wmmt3ConfigTable,
-    .configGroups = wmmt3_config_groups,
+    .prepatch = init_wmmt3_prepatch
 };
 
 MODULE_REGISTER(WMMT3_Module);

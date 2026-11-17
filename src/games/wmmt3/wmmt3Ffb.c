@@ -7,9 +7,7 @@
 
 #include "wmmt3Ffb.h"
 #include "wmmt3Input.h"
-#include "wmmt3Dinput.h"
 #include "../../config/config.h"
-#include "wmmt3Config.h"
 #include "../../devices/strpcb.h"
 #include "../../input/backend.h"
 #include "../../log/log.h"
@@ -84,7 +82,7 @@ static void on_frame(const uint8_t frame[10])
     int viscosity = frame[6];
     int reflect = (int8_t)frame[8];
 
-    if (Wmmt3Config.ffb_invert)
+    if (Config.wmmt3.ffb_invert)
         reflect = -reflect;
 
     int damper = scale(spring > viscosity ? spring : viscosity);
@@ -103,10 +101,6 @@ static void on_frame(const uint8_t frame[10])
 
 void wmmt3_ffb_motor(bool running)
 {
-    if (Wmmt3Config.input_mode != INPUT_XINPUT) {
-        wmmt3_di_ffb_motor(running);
-        return;
-    }
     if (!g_started)
         return;
     EnterCriticalSection(&g_lock);
@@ -119,17 +113,12 @@ void wmmt3_ffb_motor(bool running)
 
 void wmmt3_ffb_init(void)
 {
-    if (Wmmt3Config.input_mode != INPUT_XINPUT) {
-        bool started = wmmt3_di_ffb_init();
-        log_info(plfWmmt3, "Force feedback: %s", started ? "on (STRPCB DirectInput)" : "off");
-        return;
-    }
     const struct idas_io_backend *backend = wmmt3_input_backend();
     if (backend && backend->ffb_init)
         backend->ffb_init();
     strpcb_set_frame_sink(on_frame);
 
-    if (backend && Wmmt3Config.ffb_enable)
+    if (backend && Config.wmmt3.ffb_enable)
     {
         InitializeCriticalSection(&g_lock);
         g_wake = CreateEvent(NULL, FALSE, FALSE, NULL);

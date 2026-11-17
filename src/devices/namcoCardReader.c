@@ -11,7 +11,6 @@
 #include "namcoCardReader.h"
 #include "namcoCardPrint.h"
 #include "../config/config.h"
-#include "../games/wmmt3/wmmt3Config.h"
 #include "../log/log.h"
 
 #define STX 0x02
@@ -72,7 +71,7 @@ static double g_outputAt[1024];
 
 static bool timing(void)
 {
-    return Wmmt3Config.card_speed_emulation;
+    return Config.wmmt3.card_speed_emulation;
 }
 
 static double now_ms(void)
@@ -113,7 +112,7 @@ static void unlock(void)
 
 static const char *card_dir(void)
 {
-    return Wmmt3Config.card_dir && *Wmmt3Config.card_dir ? Wmmt3Config.card_dir : "cards";
+    return Config.wmmt3.card_dir && *Config.wmmt3.card_dir ? Config.wmmt3.card_dir : "cards";
 }
 
 static void card_path(const char *name, char *out, size_t outSize)
@@ -123,7 +122,7 @@ static void card_path(const char *name, char *out, size_t outSize)
 
 static void default_card_path(void)
 {
-    card_path(Wmmt3Config.card_file ? Wmmt3Config.card_file : "card.bin", g_cardPath, sizeof(g_cardPath));
+    card_path(Config.wmmt3.card_file ? Config.wmmt3.card_file : "card.bin", g_cardPath, sizeof(g_cardPath));
 }
 
 static bool load_card(void)
@@ -266,18 +265,18 @@ static bool try_insert(void)
 
     static DWORD lastAsk;
     DWORD now = GetTickCount();
-    if (!Wmmt3Config.card_auto_insert && (lastAsk == 0 || now - lastAsk > 2000))
+    if (!Config.wmmt3.card_auto_insert && (lastAsk == 0 || now - lastAsk > 2000))
         log_debug(plfMisc, "Card reader: the game is waiting for a card");
     lastAsk = now;
 
-    bool keyDown = Wmmt3Config.card_key && (GetAsyncKeyState(Wmmt3Config.card_key) & 0x8000);
+    bool keyDown = Config.wmmt3.card_key && (GetAsyncKeyState(Config.wmmt3.card_key) & 0x8000);
     bool pressed = keyDown && !g_insertKeyWasDown;
     g_insertKeyWasDown = keyDown;
     LONG pressedAt = InterlockedExchange(&g_insertButtonPressed, 0);
     if (pressedAt && (DWORD)GetTickCount() - (DWORD)pressedAt < 1000)
         pressed = true;
 
-    if ((pressed || Wmmt3Config.card_auto_insert) && load_card())
+    if ((pressed || Config.wmmt3.card_auto_insert) && load_card())
     {
         g_cardInside = true;
         g_cardFresh = true;
