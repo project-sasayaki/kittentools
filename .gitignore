@@ -1,3 +1,4 @@
 .vscode/
 win-debug/
 win-release/
+src/config/config.def

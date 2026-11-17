@@ -18,10 +18,13 @@ typedef struct _WMMT3_InitialData {
     const char *gameID;
     const char *verName;
     const char *windowTitle;
+    /* The Wmmt3ConfigGroups this version has. */
+    unsigned configGroups;
 } WMMT3_InitialData;
 
 bool wmmt3_hook(const char *name, void *replacement, void **next);
 
 bool is_wmmt3_crc(uint32_t crc);
+unsigned wmmt3_config_groups(uint32_t crc);
 
 void init_wmmt3_prepatch(uint32_t crc);

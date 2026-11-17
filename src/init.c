@@ -20,6 +20,21 @@ void SetKittenGuestArgument(const char* arg)
     g_guestArgument = arg;
 }
 
+/* kitten/config.ini with the settings of every game and version at their defaults: no game is known here. */
+void KittenCreateConfig(void)
+{
+    ConfigSelection own[__stop_game_modules - __start_game_modules + 1];
+    size_t count = 0;
+    unsigned groups = 0;
+
+    for (const GameModule** it = __start_game_modules; it < __stop_game_modules; ++it)
+    {
+        groups |= (*it)->sharedConfig;
+        own[count++] = (ConfigSelection){.table = (*it)->config, .groups = ~0u};
+    }
+    config_write(groups, own, count);
+}
+
 bool KittenInit(uint32_t crc)
 {
     const GameModule* module;
@@ -30,6 +45,14 @@ bool KittenInit(uint32_t crc)
 
         if (module->detect(crc))
         {
+            if (module->config)
+                config_read_table(module->config);
+            ConfigSelection own = {
+                .table = module->config,
+                .groups = module->configGroups ? module->configGroups(crc) : 0,
+            };
+            config_write(module->sharedConfig, &own, 1);
+
             module->init();
 
             detectGPUType();
