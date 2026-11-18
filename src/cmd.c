@@ -6,6 +6,7 @@
 #include "cmd.h"
 #include "version_git.h"
 #include "config/config.h"
+#include "init.h"
 
 void printUsage(char *programName)
 {
@@ -15,7 +16,7 @@ void printUsage(char *programName)
     printf("Options:\n");
     printf("  --version          | -v  Displays the version of the KittenTools\n");
     printf("  --help             | -h  Displays this usage text\n");
-    printf("  --create           | -C  Creates a default config.ini file\n");
+    printf("  --create           | -C  Creates a default config.ini file with the settings of every game\n");
 }
 
 void printVersion()
@@ -54,7 +55,7 @@ int parseArgs(int argc, char *argv[], char *command, char *gameELF)
         }
         else if (strcmp(argv[i], "-C") == 0 || strcmp(argv[i], "--create") == 0)
         {
-            save_current_config(true);
+            KittenCreateConfig();
             return PARSE_ARGS_HELP;
         }
         else

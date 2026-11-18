@@ -11,6 +11,7 @@
 #include "wmmt3Hasp.h"
 #include "../patchlib.h"
 #include "../../config/config.h"
+#include "wmmt3Config.h"
 #include "../../elfLoader/symbol.h"
 #include "../../log/log.h"
 #include "../../hooks/file.h"
@@ -244,9 +245,9 @@ void wmmt3_install_hasp(void)
     snprintf(g_memoryPath, sizeof(g_memoryPath), "%s\\kitten\\hasp_memory.bin", cwd);
     snprintf(g_countPath, sizeof(g_countPath), "%s\\kitten\\hasp_card_count.txt", cwd);
     load_memory();
-    parse_serial(Config.wmmt3.hasp_serial, "000000-000001", "hasp_serial",
+    parse_serial(Wmmt3Config.hasp_serial, "000000-000001", "hasp_serial",
                  &g_classes[0].valueHi, &g_classes[0].valueLo);
-    parse_serial(Config.wmmt3.hasp2_serial, "000000-000002", "hasp2_serial",
+    parse_serial(Wmmt3Config.hasp2_serial, "000000-000002", "hasp2_serial",
                  &g_classes[1].valueHi, &g_classes[1].valueLo);
 
     /* 3DX+ counts HASP keys in the kernel's USB device list. */

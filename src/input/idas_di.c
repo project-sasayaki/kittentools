@@ -84,6 +84,11 @@ static IDirectInputEffect *idas_di_fx_rumble;
 static IDirectInputEffect *idas_di_fx_damper;
 static volatile LONG idas_di_ffb_closed;
 
+void *idas_di_ffb_device(void)
+{
+    return idas_di_dev;
+}
+
 /* A wheel keeps its last effect after the process dies. */
 static void idas_di_ffb_release(void)
 {

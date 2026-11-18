@@ -1,4 +1,5 @@
 #include "wmmt3.h"
+#include "wmmt3Config.h"
 #include "../../init.h"
 #include "../games.h"
 #include "../../devices/device.h"
@@ -71,7 +72,7 @@ static void wmmt3_init(void)
         .setattr = serialLinkSetAttr,
     };
     if (wmmt3_card_reader_external())
-        serialLinkConfigure(Config.wmmt3.card_reader_port, "Card reader");
+        serialLinkConfigure(Wmmt3Config.card_reader_port, "Card reader");
 
     log_debug(plfBoot, "Initializing main...");
     InitDevices();
@@ -82,14 +83,16 @@ static void wmmt3_init(void)
 
 bool wmmt3_card_reader_external(void)
 {
-    return Config.wmmt3.card_reader_port && Config.wmmt3.card_reader_port[0];
+    return Wmmt3Config.card_reader_port && Wmmt3Config.card_reader_port[0];
 }
 
 static const GameModule WMMT3_Module = {
     .name = "WMMT3",
     .detect = is_wmmt3_crc,
     .init = wmmt3_init,
-    .prepatch = init_wmmt3_prepatch
+    .prepatch = init_wmmt3_prepatch,
+    .config = &Wmmt3ConfigTable,
+    .configGroups = wmmt3_config_groups,
 };
 
 MODULE_REGISTER(WMMT3_Module);

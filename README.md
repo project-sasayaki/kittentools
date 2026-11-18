@@ -69,13 +69,13 @@ kitten.exe --binary <elf_file> [ELF arguments]
 
 ## Settings
 
-Settings are in `kitten/config.ini`, in the folder the game is started from. The file holds the settings of every supported game. KittenTools writes it again on every start, keeping the values set in it and adding any settings it lacks.
+Settings are in `kitten/config.ini`, in the folder the game is started from. KittenTools writes the file when a game starts and lists in it the settings of that game only, so keep one folder per game: started from a folder whose file holds another game's settings, those are replaced by this game's.
 
-`kitten.exe --create` writes the file without starting a game.
+`kitten.exe --create` writes a file with the settings of every game, before any game has run; it is narrowed to the game on its first start, keeping the values set in it.
 
 ## Wangan Midnight Maximum Tune 3 settings
 
-The settings for Wangan Midnight Maximum Tune 3 / 3DX / 3DX+ are in the `[wmmt3]` section of `kitten/config.ini`: screen, coins, card, keys, gamepad, steering wheel, force feedback, sound, load times and dongles. The other sections are for the other games, except `[sysconf] log_level` and the H-pattern shifter below. `hasp2_serial`, the serial number of the second dongle, is used by 3DX+ only.
+Everything to set for Wangan Midnight Maximum Tune 3 / 3DX / 3DX+ is in the `[wmmt3]` section of `kitten/config.ini`: screen, coins, card, keys, gamepad, steering wheel, force feedback, sound and load times. Beside it the file has only `[sysconf] log_level`. `hasp2_serial`, the serial number of the second dongle, is listed for 3DX+ only.
 
 With an XInput gamepad the controller rumbles on the expressway's road joints, where the game gives the cabinet's wheel a kick (`xinput_rumble`, 0 = off; `xinput_rumble_ms`, the length of each pulse). That is the only force a gamepad reproduces: the wheel's centring, weight and side force have nothing to act on in a pad and are not sent to it. A steering wheel gets the joints through its normal force feedback.
 
@@ -86,7 +86,7 @@ The card reader is built in by default. To use one outside KittenTools instead, 
 
 While nothing answers on that port or pipe, the game sees a reader that does not respond. With an external reader the card files, the insert key and the print images of the built-in reader are not used.
 
-The buttons of an H-pattern shifter are `gear1` to `gear6` in `[dinput]` (DirectInput button numbers, 0 = none). They are read only with `[io3] mode = 2` and a steering wheel (`[wmmt3] input_mode = 2`); without them the shifter is moved one gear at a time with `dinput_shift_down` / `dinput_shift_up`.
+The buttons of an H-pattern shifter are `dinput_gear1` to `dinput_gear6` in that section. They were `gear1` to `gear6` in `[dinput]`, also needing `[io3] mode = 2`; a file from then is still read, and is written back with the new names.
 
 ## Wangan Midnight Maximum Tune 3 linked play
 

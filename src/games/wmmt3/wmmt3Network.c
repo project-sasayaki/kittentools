@@ -23,6 +23,7 @@
 
 #include "wmmt3Network.h"
 #include "../../config/config.h"
+#include "wmmt3Config.h"
 #include "../../elfLoader/elfLoader.h"
 #include "../../log/log.h"
 
@@ -374,8 +375,8 @@ bool wmmt3_network_interface(Wmmt3Interface *out)
 /* link_ip names the address outright; without it, it is this PC's address inside link_subnet. */
 static void choose_interface(void)
 {
-    const char *address = Config.wmmt3.link_ip ? Config.wmmt3.link_ip : "";
-    const char *subnet = Config.wmmt3.link_subnet ? Config.wmmt3.link_subnet : "";
+    const char *address = Wmmt3Config.link_ip ? Wmmt3Config.link_ip : "";
+    const char *subnet = Wmmt3Config.link_subnet ? Wmmt3Config.link_subnet : "";
     uint32_t network = 0, mask = WHOLE_ADDRESS;
     if (address[0])
     {
