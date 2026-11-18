@@ -22,6 +22,8 @@ typedef struct _WMMT3_InitialData {
 
 bool wmmt3_hook(const char *name, void *replacement, void **next);
 
+bool wmmt3_card_reader_external(void);
+
 bool is_wmmt3_crc(uint32_t crc);
 
 void init_wmmt3_prepatch(uint32_t crc);

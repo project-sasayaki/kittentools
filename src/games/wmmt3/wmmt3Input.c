@@ -171,7 +171,7 @@ static void read_switches(struct io3_switch_state *out)
 
     static bool cardHeld;
     bool card = key_down(Config.wmmt3.card_key) || wheel_button(wheel, Config.wmmt3.dinput_card);
-    if (card && !cardHeld)
+    if (card && !cardHeld && !wmmt3_card_reader_external())
         namcoCardReaderRequestInsert();
     cardHeld = card;
 }
@@ -256,7 +256,7 @@ const struct idas_io_backend *wmmt3_input_backend(void)
     return g_backend;
 }
 
-/* The gamepad backend is shared with other games and reads [xinput]. */
+/* The gamepad backend is shared with other games and reads [xinput] and [ffb]. */
 static void configure_gamepad(void)
 {
     Config.xinput.deviceIndex = Config.wmmt3.xinput_device;
@@ -276,6 +276,9 @@ static void configure_gamepad(void)
     Config.xinput.steeringExponent = Config.wmmt3.xinput_steering_exponent;
     Config.xinput.leftStickDeadzone = Config.wmmt3.xinput_left_deadzone;
     Config.xinput.rightStickDeadzone = Config.wmmt3.xinput_right_deadzone;
+
+    int rumble = Config.wmmt3.xinput_rumble;
+    Config.ffb.rumbleStrength = rumble < 0 ? 0 : rumble > 100 ? 100 : rumble;
 }
 
 /* The steering wheel backend is shared with other games and reads [dinput] and [ffb]. */

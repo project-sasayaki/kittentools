@@ -5,6 +5,8 @@
 #include "../../devices/strpcb.h"
 #include "../../devices/namcoJvio.h"
 #include "../../devices/namcoCardReader.h"
+#include "../../devices/serialLink.h"
+#include "../../config/config.h"
 #include "../../log/log.h"
 
 static void wmmt3_init(void)
@@ -54,11 +56,33 @@ static void wmmt3_init(void)
         .close = namcoCardReaderClose,
     };
 
+    DeviceDescriptor cardReaderLink = {
+        .fd = -1,
+        .emulate = 1,
+        .mountPoint = "/dev/ttyM2",
+        .redirectPoint = "NUL",
+        .type = DEVICE_TYPE_PCI_CARD_000,
+        .name = "card reader",
+        .init = serialLinkInit,
+        .ioctl = serialLinkIoctl,
+        .read = serialLinkRead,
+        .write = serialLinkWrite,
+        .close = serialLinkClose,
+        .setattr = serialLinkSetAttr,
+    };
+    if (wmmt3_card_reader_external())
+        serialLinkConfigure(Config.wmmt3.card_reader_port, "Card reader");
+
     log_debug(plfBoot, "Initializing main...");
     InitDevices();
     attachDevice(&strpcb);
     attachDevice(&jvio);
-    attachDevice(&cardReader);
+    attachDevice(wmmt3_card_reader_external() ? &cardReaderLink : &cardReader);
+}
+
+bool wmmt3_card_reader_external(void)
+{
+    return Config.wmmt3.card_reader_port && Config.wmmt3.card_reader_port[0];
 }
 
 static const GameModule WMMT3_Module = {

@@ -8,6 +8,8 @@
 #include "../log/log.h"
 #include "elfLoader.h"
 #include <string.h>
+#include <sys/types.h>
+#include "../devices/device.h"
 
 static IntMap g_termios_state;
 
@@ -72,6 +74,10 @@ int hook_tcsetattr(int fd, int optional_actions, const struct linux_termios *ter
     *existing = *termios_p;
 
     log_debug(plfBridges, "tcsetattr: fd=%d, speed=%d, flags=0x%x", fd, termios_p->c_ospeed, termios_p->c_cflag);
+
+    DeviceDescriptor *device = getDevice(fd);
+    if (device && device->setattr)
+        return device->setattr(fd, termios_p);
     return 0;
 }
 
