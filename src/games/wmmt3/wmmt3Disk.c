@@ -8,6 +8,7 @@
 
 #include "wmmt3Disk.h"
 #include "../../config/config.h"
+#include "wmmt3Config.h"
 #include "../../hooks/file.h"
 #include "../../log/log.h"
 
@@ -306,11 +307,11 @@ static const FileObserver g_observer = {on_opened, on_read, on_closed};
 
 void wmmt3_install_disk_model(void)
 {
-    if (!Config.wmmt3.disk_speed_emulation)
+    if (!Wmmt3Config.disk_speed_emulation)
         return;
-    int mbps = Config.wmmt3.disk_mbps > 0 ? Config.wmmt3.disk_mbps : 30;
-    int seek = Config.wmmt3.disk_seek_ms >= 0 ? Config.wmmt3.disk_seek_ms : 13;
-    int ram = Config.wmmt3.cabinet_ram_mb, used = Config.wmmt3.cabinet_used_mb;
+    int mbps = Wmmt3Config.disk_mbps > 0 ? Wmmt3Config.disk_mbps : 30;
+    int seek = Wmmt3Config.disk_seek_ms >= 0 ? Wmmt3Config.disk_seek_ms : 13;
+    int ram = Wmmt3Config.cabinet_ram_mb, used = Wmmt3Config.cabinet_used_mb;
 
     InitializeCriticalSection(&g_lock);
     for (int i = 0; i < MAX_HANDLES; i++)

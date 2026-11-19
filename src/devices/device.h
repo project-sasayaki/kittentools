@@ -16,6 +16,8 @@ typedef int (*DeviceCloseFunc)(int fd);
 typedef ssize_t (*DeviceReadFunc)(int fd, void *buf, size_t count);
 typedef ssize_t (*DeviceWriteFunc)(int fd, const void *buf, size_t count);
 typedef int (*DeviceIoctlFunc)(int fd, unsigned long request, void *data);
+struct linux_termios;
+typedef int (*DeviceSetAttrFunc)(int fd, const struct linux_termios *termios);
 
 
 typedef struct {
@@ -29,8 +31,9 @@ typedef struct {
     DeviceIoctlFunc ioctl;   
     DeviceReadFunc read;     
     DeviceWriteFunc write;   
-    DeviceCloseFunc close;   
-    void *privateData;           
+    DeviceCloseFunc close;
+    DeviceSetAttrFunc setattr;
+    void *privateData;         
 } DeviceDescriptor;
 
 

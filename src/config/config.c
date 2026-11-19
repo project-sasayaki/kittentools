@@ -1,4 +1,6 @@
 #include "config.h"
+#include <errno.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,20 +17,33 @@ static uint32_t net_subnet_addr = 0;
 static bool is_server_box = false;
 
 config_t Config = {
-#define SECTION(s, comment) .s = {
-#define CFG_str(s, n, default, comment) .n = default,
-#define CFG_bool(s, n, default, comment) .n = default,
-#define CFG_int(s, n, default, comment) .n = default,
-#define CFG_hex(s, n, precision, default, comment) .n = default,
-#define CFG_ipv4(s, n, a, b, c, d, comment)                                   \
-    .n = (unsigned int)(((unsigned char)d << 24) | ((unsigned char)c << 16) | \
-                        ((unsigned char)b << 8) | (unsigned char)a),
+#define SECTION(s, text) .s = {
 #define ENDSECTION(s) \
     }                 \
     ,
+#include "configDefDefaults.h"
 #include "config.def"
     ._keep_linter_happy = true
 };
+
+static const ConfigItem g_items[] = {
+#define CONFIG_DEF_OFFSET(s, n) offsetof(config_t, s.n)
+#include "configDefItems.h"
+#include "config.def"
+#undef CONFIG_DEF_OFFSET
+};
+
+static const ConfigTable g_table = {
+    .items = g_items,
+    .count = sizeof(g_items) / sizeof(g_items[0]),
+    .values = &Config,
+};
+
+/* The settings of config.def as the file gave them. load_config() goes on to derive some of Config
+ * from the rest (the resolution from the DIP switches, the network off without an adapter) and a
+ * game may set more of it; the file keeps what the player wrote. */
+static config_t g_fileConfig;
+static bool g_fileConfigRead = false;
 
 static void fprintf_prefix(FILE *file, const char *prefix, const char *text) {
     char *copy = (char *)malloc(strlen(text) + 1);
@@ -44,7 +59,76 @@ static void fprintf_prefix(FILE *file, const char *prefix, const char *text) {
     free(copy);
 }
 
-void save_current_config(bool writeDefault) {
+static void write_comment(FILE *file, const char *comment) {
+    if (comment != NULL && strlen(comment) != 0) fprintf_prefix(file, "; ", comment);
+}
+
+/* The items of the groups given, and those that stand before the table's first GROUP(). */
+static void write_table(FILE *file, const ConfigTable *table, const void *values, unsigned groups,
+                        bool *first_section) {
+    bool wanted = true;
+
+    for (size_t i = 0; i < table->count; i++) {
+        const ConfigItem *item = &table->items[i];
+        const void *value = (const char *)values + item->offset;
+
+        if (item->type == CONFIG_ITEM_GROUP) {
+            wanted = (item->group & groups) != 0;
+            continue;
+        }
+        if (!wanted) continue;
+
+        switch (item->type) {
+            case CONFIG_ITEM_SECTION:
+                if (!*first_section) fprintf(file, "\n");
+                *first_section = false;
+                write_comment(file, item->comment);
+                fprintf(file, "[%s]\n", item->section);
+                break;
+            case CONFIG_ITEM_COMMENT:
+                write_comment(file, item->comment);
+                break;
+            case CONFIG_ITEM_NEWLINE:
+                fprintf(file, "\n");
+                break;
+            case CONFIG_ITEM_STR:
+                write_comment(file, item->comment);
+                fprintf(file, "; (string) default = %s\n", item->defaultStr);
+                fprintf(file, "%s = %s\n", item->name, *(char *const *)value);
+                break;
+            case CONFIG_ITEM_BOOL:
+                write_comment(file, item->comment);
+                fprintf(file, "; (bool) default = %s\n", item->defaultInt ? "true" : "false");
+                fprintf(file, "%s = %s\n", item->name, *(const bool *)value ? "true" : "false");
+                break;
+            case CONFIG_ITEM_INT:
+                write_comment(file, item->comment);
+                fprintf(file, "; (int) default = %d\n", item->defaultInt);
+                fprintf(file, "%s = %d\n", item->name, *(const int *)value);
+                break;
+            case CONFIG_ITEM_HEX:
+                write_comment(file, item->comment);
+                fprintf(file, "; (hex, %d byte%s) default = 0x%.*X \n", item->precision,
+                        item->precision == 1 ? "" : "s", item->precision, item->defaultInt);
+                fprintf(file, "%s = 0x%.*X\n", item->name, item->precision, *(const int *)value);
+                break;
+            case CONFIG_ITEM_IPV4: {
+                unsigned int d = item->defaultIpv4;
+                unsigned int v = *(const unsigned int *)value;
+                write_comment(file, item->comment);
+                fprintf(file, "; (ipv4) default = %u.%u.%u.%u ;(ipv4)\n", d & 0xff, (d >> 8) & 0xff,
+                        (d >> 16) & 0xff, d >> 24);
+                fprintf(file, "%s = %u.%u.%u.%u\n", item->name, v & 0xff, (v >> 8) & 0xff,
+                        (v >> 16) & 0xff, v >> 24);
+                break;
+            }
+            default:
+                break;
+        }
+    }
+}
+
+void config_write(unsigned groups, const ConfigSelection *own, size_t ownCount) {
     CreateDirectoryA("kitten", NULL);
 
     FILE *config_file;
@@ -53,92 +137,73 @@ void save_current_config(bool writeDefault) {
         puts("Failed to create config file!");
         return;
     }
-    int first_section = true;
+    bool first_section = true;
 
-#define CFG_str(s, n, default, comment)                                                         \
-    if (strlen(comment) != 0) fprintf_prefix(config_file, "; ", comment);                       \
-    fprintf(config_file, "; (string) default = %s\n", writeDefault ? default : Config.s.n); \
-    fprintf(config_file, "%s = %s\n", #n, Config.s.n);
-
-#define CFG_bool(s, n, default, comment)                                   \
-    if (strlen(comment) != 0) fprintf_prefix(config_file, "; ", comment);  \
-    fprintf(config_file, "; (bool) default = %s\n",                        \
-            (writeDefault ? default : Config.s.n) ? "true" : "false"); \
-    fprintf(config_file, "%s = %s\n", #n, Config.s.n ? "true" : "false");
-
-#define CFG_int(s, n, default, comment)                                                      \
-    if (strlen(comment) != 0) fprintf_prefix(config_file, "; ", comment);                    \
-    fprintf(config_file, "; (int) default = %d\n", writeDefault ? default : Config.s.n); \
-    fprintf(config_file, "%s = %d\n", #n, Config.s.n);
-
-#define CFG_hex(s, n, precision, default, comment)                                              \
-    if (strlen(comment) != 0) fprintf_prefix(config_file, "; ", comment);                       \
-    fprintf(config_file, "; (hex, %d byte%s) default = 0x%.*X \n", precision,                     \
-            precision == 1 ? "" : "s", precision, writeDefault ? default : Config.s.n); \
-    fprintf(config_file, "%s = 0x%.*X\n", #n, precision, Config.s.n);
-
-#define CFG_ipv4(s, n, a, b, c, d, comment)                                        \
-    if (strlen(comment) != 0) fprintf_prefix(config_file, "; ", comment);          \
-    fprintf(config_file, "; (ipv4) default = %hhu.%hhu.%hhu.%hhu ;(ipv4)\n",       \
-            writeDefault ? a: (Config.s.n & 0xff),                           \
-            writeDefault ? b: (Config.s.n >> 8) & 0xff,                      \
-            writeDefault ? c: (Config.s.n >> 16) & 0xff,                     \
-            writeDefault ? d: (Config.s.n >> 24));                           \
-    fprintf(config_file, "%s = %hhu.%hhu.%hhu.%hhu\n", #n, (Config.s.n & 0xff), \
-            ((Config.s.n >> 8) & 0xff), ((Config.s.n >> 16) & 0xff),       \
-            (Config.s.n >> 24));
-
-#define SECTION(s, comment)                                               \
-    if (!first_section) fprintf(config_file, "\n");                       \
-    first_section = false;                                                \
-    if (strlen(comment) != 0) fprintf_prefix(config_file, "; ", comment); \
-    fprintf(config_file, "[%s]\n", #s);
-
-#define COMMENT(comment) \
-    if (strlen(comment) != 0) fprintf_prefix(config_file, "; ", comment);
-
-#define NEWLINE() fprintf(config_file, "\n");
-
-#include "config.def"
+    write_table(config_file, &g_table, g_fileConfigRead ? &g_fileConfig : &Config,
+                groups | CONFIG_GROUP_COMMON, &first_section);
+    for (size_t i = 0; i < ownCount; i++) {
+        if (own[i].table != NULL)
+            write_table(config_file, own[i].table, own[i].table->values, own[i].groups, &first_section);
+    }
 
     fclose(config_file);
 }
 
+/* inih handler: one "name = value" line of the file, given to the table's setting of that name. */
 static int handler(void *user, const char *section, const char *name, const char *value) {
-    config_t *cfg = (config_t *)user;
+    const ConfigTable *table = (const ConfigTable *)user;
 
     char *end;
 
-    if (false)
-        ;
-#define CFG_str(s, n, default, comment) \
-    else if (_stricmp(section, #s) == 0 && _stricmp(name, #n) == 0) cfg->s.n = _strdup(value);
-#define CFG_bool(s, n, default, comment)                                       \
-    else if (_stricmp(section, #s) == 0 && _stricmp(name, #n) == 0) cfg->s.n = \
-        strcmp(value, "true") == 0;
-#define CFG_int(s, n, default, comment)                                          \
-    else if (_stricmp(section, #s) == 0 && _stricmp(name, #n) == 0) {            \
-        cfg->s.n = strtol(value, &end, 10);                                      \
-        if (end == value || *end != '\0' || errno == ERANGE) cfg->s.n = default; \
-    }
-#define CFG_hex(s, n, precision, default, comment)                                   \
-    else if (_stricmp(section, #s) == 0 && _stricmp(name, #n) == 0) {                \
-        cfg->s.n = strtol(value, &end, 16);                                          \
-        if (end == value || *end != '\0' || errno == ERANGE) cfg->s.n = default; \
-    }
-#define CFG_ipv4(s, n, a, b, c, d, comment)                                                 \
-    else if (_stricmp(section, #s) == 0 && _stricmp(name, #n) == 0) {                       \
-        unsigned char ip_a, ip_b, ip_c, ip_d;                                               \
-        if (sscanf(value, "%hhu.%hhu.%hhu.%hhu", &ip_a, &ip_b, &ip_c, &ip_d) == 4)          \
-            cfg->s.n = (unsigned int)((ip_d << 24) | (ip_c << 16) | (ip_b << 8) | ip_a);    \
-        else                                                                                \
-            cfg->s.n = (unsigned int)(((unsigned char)d << 24) | ((unsigned char)c << 16) | \
-                                      ((unsigned char)b << 8) | (unsigned char)a);          \
-    }
+    for (size_t i = 0; i < table->count; i++) {
+        const ConfigItem *item = &table->items[i];
+        void *out = (char *)table->values + item->offset;
 
-#include "config.def"
+        if (item->name == NULL || _stricmp(section, item->section) != 0 || _stricmp(name, item->name) != 0)
+            continue;
+
+        switch (item->type) {
+            case CONFIG_ITEM_STR:
+                *(char **)out = _strdup(value);
+                break;
+            case CONFIG_ITEM_BOOL:
+                *(bool *)out = strcmp(value, "true") == 0;
+                break;
+            case CONFIG_ITEM_INT:
+                *(int *)out = strtol(value, &end, 10);
+                if (end == value || *end != '\0' || errno == ERANGE) *(int *)out = item->defaultInt;
+                break;
+            case CONFIG_ITEM_HEX:
+                *(int *)out = strtol(value, &end, 16);
+                if (end == value || *end != '\0' || errno == ERANGE) *(int *)out = item->defaultInt;
+                break;
+            case CONFIG_ITEM_IPV4: {
+                unsigned char ip_a, ip_b, ip_c, ip_d;
+                if (sscanf(value, "%hhu.%hhu.%hhu.%hhu", &ip_a, &ip_b, &ip_c, &ip_d) == 4)
+                    *(unsigned int *)out = (unsigned int)((ip_d << 24) | (ip_c << 16) | (ip_b << 8) | ip_a);
+                else
+                    *(unsigned int *)out = item->defaultIpv4;
+                break;
+            }
+            case CONFIG_ITEM_RENAMED_STR:
+                *(char **)out = _strdup(value);
+                break;
+            case CONFIG_ITEM_RENAMED_INT: {
+                long renamed = strtol(value, &end, 10);
+                if (end != value && *end == '\0') *(int *)out = renamed;
+                break;
+            }
+            default:
+                break;
+        }
+        return 1;
+    }
 
     return 1;
+}
+
+void config_read_table(const ConfigTable *table) {
+    ini_parse(CONFIG_PATH, handler, (void *)table);
 }
 
 static int parseSubnetConfig() {
@@ -241,7 +306,7 @@ bool isServerBox() {
 const unsigned int RES_W[8] = {640, 800, 1024, 1280, 800, 1024, 1280, 1360};
 const unsigned int RES_H[8] = {480, 480, 768, 768, 600, 600, 1024, 768};
 void load_config() {
-    if (ini_parse(CONFIG_PATH, handler, &Config) < 0)
+    if (ini_parse(CONFIG_PATH, handler, (void *)&g_table) < 0)
     {
         MessageBox(
             NULL,
@@ -252,7 +317,9 @@ void load_config() {
         log_error(plfBoot, "Configuration file not found at \"%s\", loading default settings", CONFIG_PATH);
     }
 
-    save_current_config(true);
+    /* The file is written once the game is known: KittenInit(). */
+    g_fileConfig = Config;
+    g_fileConfigRead = true;
 
     if (parseSubnetConfig())
     {

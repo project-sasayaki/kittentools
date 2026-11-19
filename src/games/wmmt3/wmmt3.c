@@ -10,6 +10,7 @@
 #include "wmmt3Input.h"
 #include "wmmt3Ffb.h"
 #include "../../config/config.h"
+#include "wmmt3Config.h"
 #include "../../elfLoader/libc.h"
 #include "../../hooks/file.h"
 #include "../../log/log.h"
@@ -56,6 +57,7 @@ static const WMMT3_InitialData WMMT3DXP_JPN_Data = {
     .gameID = "W3P100-1-NA-DAT0-B02",
     .verName = "Wangan Midnight Maximum Tune 3DX+ (JPN)",
     .windowTitle = "WANGAN MIDNIGHT MAXIMUM TUNE 3DX PLUS",
+    .configGroups = WMMT3_CONFIG_DX_PLUS,
 };
 
 static const WMMT3_InitialData WMMT3DX_EXP_C09_Data = {
@@ -68,12 +70,14 @@ static const WMMT3_InitialData WMMT3DXP_EXP_Data = {
     .gameID = "W3P100-2-NA-DAT0-B02",
     .verName = "Wangan Midnight Maximum Tune 3DX+ (EXP)",
     .windowTitle = "WANGAN MIDNIGHT MAXIMUM TUNE 3DX PLUS",
+    .configGroups = WMMT3_CONFIG_DX_PLUS,
 };
 
 static const WMMT3_InitialData WMMT3DXP_CHN_Data = {
     .gameID = "W3P100-5-NA-DAT0-A16",
     .verName = "Wangan Midnight Maximum Tune 3DX+ (CHN)",
     .windowTitle = "WANGAN MIDNIGHT MAXIMUM TUNE 3DX PLUS",
+    .configGroups = WMMT3_CONFIG_DX_PLUS,
 };
 
 static const struct {
@@ -102,10 +106,20 @@ bool is_wmmt3_crc(uint32_t crc)
     return false;
 }
 
+unsigned wmmt3_config_groups(uint32_t crc)
+{
+    for (size_t i = 0; i < ARRAYSIZE(g_WMMT3Versions); ++i)
+    {
+        if (g_WMMT3Versions[i].crc == crc)
+            return g_WMMT3Versions[i].data->configGroups;
+    }
+    return 0;
+}
+
 /* Answers clTestMode::isFreePlay. */
 static void install_free_play(void)
 {
-    if (!Config.wmmt3.free_play)
+    if (!Wmmt3Config.free_play)
         return;
     if (!wmmt3_hook("_ZNK10clTestMode10isFreePlayEv", (void *)stubRetOne, NULL))
     {
@@ -154,9 +168,9 @@ void init_wmmt3_prepatch(uint32_t crc)
     wmmt3_input_init();
     wmmt3_ffb_init();
     install_free_play();
-    openal_install_hooks(Config.wmmt3.openal_dll);
+    openal_install_hooks(Wmmt3Config.openal_dll);
     wmmt3_install_disk_model();
-    if (Config.wmmt3.linked_play)
+    if (Wmmt3Config.linked_play)
         wmmt3_network_init();
     else
         install_standalone_boot();

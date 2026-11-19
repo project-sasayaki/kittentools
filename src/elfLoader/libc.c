@@ -16,6 +16,7 @@
 #include <locale.h>
 #include "../hooks/file.h"
 #include "libc.h"
+#include "glibcRandom.h"
 #include "../log/log.h"
 #include "symbol.h"
 #include "elfLoader.h"
@@ -85,7 +86,6 @@ void *hook_dlsym(void *handle, const char *symbol);
 int hook_dlclose(void *handle);
 char *hook_dlerror();
 
-int hook_rand_r(unsigned int *seedp);
 
 static FILE *g_stdin = NULL;
 static FILE *g_stdout = NULL;
@@ -171,9 +171,11 @@ void libcBridge_initBridges(void)
     symbol_register("wait", hook_wait, NULL);
     symbol_register("getenv", hook_getenv, NULL);
 
-    symbol_register("rand", rand, NULL);
-    symbol_register("rand_r", hook_rand_r, NULL);
-    symbol_register("srand", srand, NULL);
+    symbol_register("rand", glibcRandom_rand, NULL);
+    symbol_register("rand_r", glibcRandom_rand_r, NULL);
+    symbol_register("srand", glibcRandom_srand, NULL);
+    symbol_register("random", glibcRandom_random, NULL);
+    symbol_register("srandom", glibcRandom_srandom, NULL);
     symbol_register("raise", hook_raise, NULL);
     symbol_register("poll", hook_poll, NULL);
     symbol_register("realpath", hook_realpath, NULL);
@@ -719,8 +721,3 @@ char *hook_dlerror()
     return NULL;
 }
 
-int hook_rand_r(unsigned int *seedp)
-{
-    *seedp = *seedp * 1103515245u + 12345u;
-    return (int)(*seedp / 65536u % 32768u);
-}
