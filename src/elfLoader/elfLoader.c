@@ -287,7 +287,109 @@ static bool follow_text_link(char *path, size_t pathSize)
     return true;
 }
 
-static bool find_guest_library(const char *name, char *out, size_t outSize)
+/* The DT_SONAME a shared library names itself by, or false when the file is not one. */
+static bool read_soname(const char *path, char *out, size_t outSize)
+{
+    ElfFile elf;
+    if (!load_elf32(&elf, path))
+        return false;
+
+    bool found = false;
+    size_t dynIdx = find_section_by_type(&elf, SHT_DYNAMIC);
+    const Elf32_Shdr *dynSec = dynIdx != (size_t)-1 ? get_section(&elf, dynIdx) : NULL;
+    const Elf32_Shdr *strSec = dynSec ? get_section(&elf, dynSec->sh_link) : NULL;
+    size_t dynCount = 0;
+    const Elf32_Dyn *dynArr = dynSec ? get_dynamic_array(&elf, dynSec, &dynCount) : NULL;
+
+    if (dynArr && strSec && strSec->sh_offset + strSec->sh_size <= elf.rawSize)
+    {
+        const char *dynStr = elf.rawData + strSec->sh_offset;
+        for (size_t i = 0; i < dynCount && dynArr[i].d_tag != DT_NULL; ++i)
+        {
+            uint32_t at = dynArr[i].d_un.d_val;
+            if (dynArr[i].d_tag != DT_SONAME || at >= strSec->sh_size)
+                continue;
+            size_t len = strnlen(dynStr + at, strSec->sh_size - at);
+            if (len < outSize && at + len < strSec->sh_size)
+            {
+                memcpy(out, dynStr + at, len);
+                out[len] = '\0';
+                found = true;
+            }
+            break;
+        }
+    }
+
+    free_elf32(&elf);
+    return found;
+}
+
+/* On the cabinet, ldconfig names each library in libso/ by its DT_SONAME through a symbolic link.
+ * Extracting a dump on Windows often drops those links, leaving only the files they pointed at,
+ * so this finds the library the same way ldconfig does: by the SONAME written inside it. */
+typedef struct
+{
+    char soname[256];
+    char path[MAX_PATH];
+} SonameEntry;
+
+static SonameEntry *g_Sonames = NULL;
+static size_t       g_SonameCount = 0;
+static bool         g_SonamesScanned = false;
+
+static void scan_guest_library_sonames(void)
+{
+    g_SonamesScanned = true;
+
+    char pattern[MAX_PATH];
+    if (snprintf(pattern, sizeof(pattern), "%s\\*", g_GuestLibDir) >= (int)sizeof(pattern))
+        return;
+    WIN32_FIND_DATAA found;
+    HANDLE find = FindFirstFileA(pattern, &found);
+    if (find == INVALID_HANDLE_VALUE)
+        return;
+
+    do
+    {
+        if (found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+            continue;
+
+        char path[MAX_PATH];
+        char soname[256];
+        if (snprintf(path, sizeof(path), "%s\\%s", g_GuestLibDir, found.cFileName) >= (int)sizeof(path))
+            continue;
+        if (!is_usable_file(path) || !read_soname(path, soname, sizeof(soname)))
+            continue;
+
+        SonameEntry *grown = realloc(g_Sonames, (g_SonameCount + 1) * sizeof(*g_Sonames));
+        if (!grown)
+            break;
+        g_Sonames = grown;
+        strcpy(g_Sonames[g_SonameCount].soname, soname);
+        strcpy(g_Sonames[g_SonameCount].path, path);
+        ++g_SonameCount;
+    } while (FindNextFileA(find, &found));
+
+    FindClose(find);
+}
+
+static bool find_guest_library_by_soname(const char *name, char *out, size_t outSize)
+{
+    if (!g_SonamesScanned)
+        scan_guest_library_sonames();
+
+    for (size_t i = 0; i < g_SonameCount; ++i)
+    {
+        if (strcmp(g_Sonames[i].soname, name) == 0)
+        {
+            snprintf(out, outSize, "%s", g_Sonames[i].path);
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool find_guest_library_by_file_name(const char *name, char *out, size_t outSize)
 {
     char candidate[256];
     strncpy(candidate, name, sizeof(candidate) - 1);
@@ -311,6 +413,12 @@ static bool find_guest_library(const char *name, char *out, size_t outSize)
             return false;
         *lastDot = '\0';
     }
+}
+
+static bool find_guest_library(const char *name, char *out, size_t outSize)
+{
+    return find_guest_library_by_file_name(name, out, outSize) ||
+           find_guest_library_by_soname(name, out, outSize);
 }
 
 static bool load_guest_library(const char *name)
@@ -343,7 +451,11 @@ static bool load_guest_library(const char *name)
 
     symres_enable_guest_runtime();
 
-    log_info(plfELFLoader, "Loading guest library %s", path);
+    const char *fileName = path + strlen(g_GuestLibDir) + 1;
+    if (strcmp(fileName, name) == 0)
+        log_info(plfELFLoader, "Loading guest library %s", path);
+    else
+        log_info(plfELFLoader, "Loading guest library %s for %s", path, name);
     if (!load(lib, path))
     {
         log_error(plfELFLoader, "Failed to load guest library %s", path);
@@ -705,7 +817,8 @@ static bool load_dependencies(ElfLoader *loader, const DynInfo *dyn)
         if (symres_is_library_registered(str))
             symres_load_needed_library(str);
         else if (!load_guest_library(str))
-            log_debug(plfELFLoader, "No bridge or guest copy of %s; its symbols resolve to stubs", str);
+            log_warn(plfELFLoader, "%s needs %s, but it is neither bridged nor in %s; its symbols stay unresolved",
+                     loader->path, str, g_GuestLibDir);
     }
     return true;
 }
