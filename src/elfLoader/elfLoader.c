@@ -259,6 +259,37 @@ static bool is_usable_file(const char *path)
     return info.nFileSizeHigh != 0 || info.nFileSizeLow != 0;
 }
 
+static bool is_elf_file(const char *path)
+{
+    unsigned char magic[4] = {0};
+    FILE *f = fopen(path, "rb");
+    if (!f)
+        return false;
+    size_t n = fread(magic, 1, sizeof(magic), f);
+    fclose(f);
+    return n == sizeof(magic) && memcmp(magic, "\x7f" "ELF", sizeof(magic)) == 0;
+}
+
+/* A file named like a library that is not one: what an extractor leaves for a symbolic link it
+ * could not create, in a format follow_text_link() does not read (Interix "IntxLNK", for one).
+ * Reported once per file, as several libraries may ask for the same one. */
+static void report_not_a_library(const char *path)
+{
+    static char reported[MAX_GUEST_LIBS][MAX_PATH];
+    static size_t reportedCount = 0;
+
+    for (size_t i = 0; i < reportedCount; ++i)
+    {
+        if (_stricmp(reported[i], path) == 0)
+            return;
+    }
+    if (reportedCount < MAX_GUEST_LIBS)
+        snprintf(reported[reportedCount++], MAX_PATH, "%s", path);
+
+    log_warn(plfELFLoader, "%s is not an ELF library (a symbolic link the extractor could not create?); "
+             "looking for the library elsewhere", path);
+}
+
 /* Dumps may turn a symlink into a text file naming its target. */
 static bool follow_text_link(char *path, size_t pathSize)
 {
@@ -402,7 +433,11 @@ static bool find_guest_library_by_file_name(const char *name, char *out, size_t 
         {
             follow_text_link(out, outSize);
             if (is_usable_file(out))
-                return true;
+            {
+                if (is_elf_file(out))
+                    return true;
+                report_not_a_library(out);
+            }
         }
 
         char *so = strstr(candidate, ".so.");
