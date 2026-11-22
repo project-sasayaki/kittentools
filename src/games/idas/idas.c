@@ -131,7 +131,7 @@ int hook_sFix_put(int a1, int a2, int a3, char *format)
 }
 
 int hook_setClipRect(int a1, int *a2)
-{ 
+{
     if (a2[0] + (Config.display.width >>1) == 14)
         a2[0] = -666;
     if (a2[0] + (Config.display.width >>1) == 572)
@@ -141,7 +141,7 @@ int hook_setClipRect(int a1, int *a2)
         a2[2] = -226;
     if (a2[2] + (Config.display.width >>1) == 1234)
         a2[2] = 554;
-    
+
     if (a2[1] != 0)
     {
         a2[1] = 384;
@@ -235,7 +235,7 @@ void init_idas_prepatch(uint32_t crc)
         log_error(plfBoot, "Unkown CRC 0x%08x", crc);
         MessageBox(NULL, "This ELF is not supported by Kittentools yet, thought it will still try to run it, be ware of any possible crashes.", NULL, MB_OK);
     }
-    
+
 
     log_warn(plfMisc, "  KittenTools By Project Sasayaki");
     log_warn(plfMisc, "  GAME:             %s", init ? init->verName : "UNKNOWN");
@@ -255,7 +255,7 @@ void init_idas_prepatch(uint32_t crc)
         log_warn(plfMisc, "  Anisotropic:      %dx", Config.display.anisotropic);
     log_warn(plfMisc, "  Enable Network:   %s", Config.network.enable ? "YES" : "NO");
     log_warn(plfMisc, "  INPUT MODE:       %s", Config.io3.mode == 1 ? "XInput" :
-                                                Config.io3.mode == 2 ? "DInput" : 
+                                                Config.io3.mode == 2 ? "DInput" :
                                                                        "UNKNOWN");
     isServerBox = init_idas_network(init);
     log_warn(plfMisc, "  IS_SERVERBOX:     %s", isServerBox ? "YES" : "NO");
@@ -266,7 +266,7 @@ void init_idas_prepatch(uint32_t crc)
     installIDASCutsceneHooks();
 
     if (Config.io3.mode == INPUT_DINPUT)
-        idas_di_config_apply(); 
+        idas_di_config_apply();
 
     if (init) {
         setupGameId(init->gameID);
@@ -300,7 +300,12 @@ void init_idas_prepatch(uint32_t crc)
     // Display patches
     MH_CreateHook((LPVOID)get_native_symbol_ptr("_Z19sWinProc_MakeWindowv"), hook_MakeWindow, (LPVOID*)&next_MakeWindow);
     MH_CreateHook((LPVOID)get_native_symbol_ptr("_ZN14cShaderUtility18isExistNewerSourceEPKcS1_S1_PS1_"), stubRetOne, NULL);
-    MH_CreateHook((LPVOID)get_native_symbol_ptr("_ZN10cPrimitive14setRectanglePTEfffff"), hook_drawBalloon, (void**)&next_drawBalloon);
+    // Hook the dialogue draw itself; setRectanglePT belongs to the scoped TA hook.
+    MH_STATUS balloonStatus = MH_CreateHook(
+        (LPVOID)get_native_symbol_ptr("_ZN12cDemoBalloon11drawBalloonEP14_sSceneManagerfffffb"),
+        hook_drawBalloon, (void**)&next_drawBalloon);
+    if (balloonStatus != MH_OK)
+        log_error(plfBridges, "Failed to install IDAS dialogue balloon hook: %d", (int)balloonStatus);
     MH_CreateHook((LPVOID)get_native_symbol_ptr("_ZN7cCredit14displayTextureEPNS_9__texuvwhEiii"), hook_cCreditdisplayTexture, (void**)&next_cCreditdisplayTexture);
     MH_CreateHook((LPVOID)get_native_symbol_ptr("_ZN6_sFont3putEfft"), hook_sFont_put, (void**)&next_sFont_put);
     MH_CreateHook((LPVOID)get_native_symbol_ptr("_ZN9_sFiTFont11setClipRectEPKN8_sSerial6_sRectE"), hook_setClipRect, (void**)&next_setClipRect);
