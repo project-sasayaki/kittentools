@@ -168,6 +168,7 @@ static void dispense_card(void)
     }
     memset(g_tracks, 0, sizeof(g_tracks));
     g_cardInside = true;
+    card_print_card_inserted(g_cardPath, true);
     log_info(plfMisc, "Card reader: dispensed a new card as %s", g_cardPath);
 }
 
@@ -183,12 +184,23 @@ static size_t track_span(int id, size_t *first)
     return (size_t)spans[id].count * TRACK_SIZE;
 }
 
-static void record_print(uint8_t command, const uint8_t *data, size_t length)
+static void pass_to_printer(uint8_t command, const uint8_t *data, size_t length)
 {
-    if (command == 0x78 || command == 0x7D)
-        card_print_begin();
-    else if (command == 0x7C && g_cardPath[0])
-        card_print_text(g_cardPath, data, length);
+    switch (command)
+    {
+        case 0x78:
+            card_print_settings(data, length);
+            break;
+        case 0x7A:
+            card_print_register_glyph(data, length);
+            break;
+        case 0x7C:
+            card_print_text(data, length);
+            break;
+        case 0x7D:
+            card_print_erase(data, length);
+            break;
+    }
 }
 
 static void respond(uint8_t command, char r, char p, char s, const uint8_t *data, size_t length);
@@ -281,6 +293,7 @@ static bool try_insert(void)
     {
         g_cardInside = true;
         g_cardFresh = true;
+        card_print_card_inserted(g_cardPath, false);
     }
     return g_cardInside;
 }
@@ -366,6 +379,7 @@ static void answer_enquiry(void)
             if (g_cardInside)
                 log_info(plfMisc, "Card reader: card ejected");
             g_cardInside = false;
+            card_print_card_removed();
             respond(0x80, '0', '0', '0', NULL, 0);
             break;
 
@@ -397,15 +411,15 @@ static void answer_enquiry(void)
             respond(g_command, card_position(), '0', '0', NULL, 0);
             break;
 
-        case 0x7C: /* print a line */
-        case 0x7D: /* erase the printed face */
+        case 0x7C: /* lay out text, and print it */
+        case 0x7D: /* erase printed lines */
             if (g_cardInside && busy_for(g_command == 0x7C ? PRINT_LINE_MS : ERASE_MS))
                 return;
             respond(g_command, card_position(), '0', '0', NULL, 0);
             break;
 
         case 0x78: /* print settings */
-        case 0x7A: /* user-defined glyphs */
+        case 0x7A: /* register a user glyph */
             respond(g_command, card_position(), '0', '0', NULL, 0);
             break;
 
@@ -429,7 +443,7 @@ static void accept_command(const uint8_t *frame, size_t length)
     if (commands++ < 64)
         log_debug(plfMisc, "Card reader: command %02X with %u data bytes", g_command, (unsigned)g_commandDataLength);
 
-    record_print(g_command, g_commandData, g_commandDataLength);
+    pass_to_printer(g_command, g_commandData, g_commandDataLength);
 
     uint8_t ack = ACK;
     queue(&ack, 1);
