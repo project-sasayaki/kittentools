@@ -8,7 +8,7 @@
 #include "../hooks/x11.h"
 #include "../hooks/glx.h"
 #include "../hooks/glut.h"
-#include "../graphics/gpuVendor.h"
+#include "../graphics/gpuCompat.h"
 #include "symbol.h"
 #include "../log/log.h"
 #include "../config/config.h"
@@ -219,12 +219,6 @@ static unsigned int bindIdasConstantSemantics(void *program)
     return bound;
 }
 
-static BOOL isPortableGpuVendor(uint8_t gpuVendor)
-{
-    return gpuVendor == AMD_GPU || gpuVendor == ATI_GPU ||
-           gpuVendor == INTEL_GPU;
-}
-
 static const IMAGE_SECTION_HEADER *cgImageSections(const BYTE *base,
                                                    const IMAGE_NT_HEADERS32 *nt)
 {
@@ -323,6 +317,14 @@ static BOOL patchCgPointerOperand(DWORD *operand, const void *replacement,
     return TRUE;
 }
 
+/* The Cg.dll patches the running game asked for on this GPU. */
+static BOOL wantsCgCompilerPatch(void)
+{
+    return gpuCompat_onKnownVendor(GPU_COMPAT_GENERIC_ATTRIBS |
+                                   GPU_COMPAT_CONSTANT_BANKS) ||
+           gpuCompat_onIntel(GPU_COMPAT_INTEL_SHADOW);
+}
+
 static BOOL CALLBACK patchCgCompilerForNonNvidia(PINIT_ONCE once,
                                                   PVOID parameter,
                                                   PVOID *context)
@@ -340,12 +342,12 @@ static BOOL CALLBACK patchCgCompilerForNonNvidia(PINIT_ONCE once,
     const char *formatReplacement;
     DWORD *shadowOptionOperand = NULL;
     DWORD *shadowSamplerOperand = NULL;
-    uint8_t gpuVendor = getGPUVendorID();
-    /* The semantic and constant-bank patches are for Initial D only. */
-    BOOL idas = GLHooks_IdasArbCompat();
-    BOOL patchFormats = idas && (gpuVendor == AMD_GPU || gpuVendor == ATI_GPU ||
-                                 gpuVendor == INTEL_GPU);
-    BOOL intel = gpuVendor == INTEL_GPU;
+    /* Vertex semantics -> generic ATTRn (glHooks feeds those attributes). */
+    BOOL patchSemantics = gpuCompat_onKnownVendor(GPU_COMPAT_GENERIC_ATTRIBS);
+    /* program.local/env emitter (glHooks routes the uploads to match). */
+    BOOL patchFormats = gpuCompat_onKnownVendor(GPU_COMPAT_CONSTANT_BANKS);
+    BOOL envBank = gpuCompat_onIntel(GPU_COMPAT_CONSTANT_BANKS);
+    BOOL patchShadow = gpuCompat_onIntel(GPU_COMPAT_INTEL_SHADOW);
     DWORD oldProtect;
     size_t i;
 
@@ -394,7 +396,7 @@ static BOOL CALLBACK patchCgCompilerForNonNvidia(PINIT_ONCE once,
         return TRUE;
     }
 
-    for (i = 0; idas && i < target->semanticPatchCount; ++i)
+    for (i = 0; patchSemantics && i < target->semanticPatchCount; ++i)
     {
         const CgSemanticResourcePatch *patch = &target->semanticPatches[i];
         DWORD *resource = (DWORD *)(base + patch->resourceRva);
@@ -452,7 +454,7 @@ static BOOL CALLBACK patchCgCompilerForNonNvidia(PINIT_ONCE once,
         }
     }
 
-    if (intel)
+    if (patchShadow)
     {
         BYTE *optionString;
         BYTE *samplerString;
@@ -496,7 +498,7 @@ static BOOL CALLBACK patchCgCompilerForNonNvidia(PINIT_ONCE once,
         }
     }
 
-    for (i = 0; idas && i < target->semanticPatchCount; ++i)
+    for (i = 0; patchSemantics && i < target->semanticPatchCount; ++i)
     {
         const CgSemanticResourcePatch *patch = &target->semanticPatches[i];
         DWORD *resource = (DWORD *)(base + patch->resourceRva);
@@ -511,7 +513,7 @@ static BOOL CALLBACK patchCgCompilerForNonNvidia(PINIT_ONCE once,
         *resource = patch->replacementResource;
         VirtualProtect(resource, sizeof(*resource), oldProtect, &oldProtect);
     }
-    if (idas)
+    if (patchSemantics)
         log_debug(plfHooks,
                   "[cg] Cg %s non-NVIDIA compatibility: mapped %zu vertex semantics to generic ATTR resources",
                   target->version, target->semanticPatchCount);
@@ -520,8 +522,8 @@ static BOOL CALLBACK patchCgCompilerForNonNvidia(PINIT_ONCE once,
     {
         const CgFormatPointerPatch *patch = &target->localFormatPatches[i];
         DWORD *operand = (DWORD *)(base + patch->pointerOperandRva);
-        formatReplacement = intel ? patch->intelReplacement
-                                  : patch->amdReplacement;
+        formatReplacement = envBank ? patch->intelReplacement
+                                    : patch->amdReplacement;
         if (!patchCgPointerOperand(operand, formatReplacement,
                                    "ARB parameter-space emitter"))
             return TRUE;
@@ -535,10 +537,14 @@ static BOOL CALLBACK patchCgCompilerForNonNvidia(PINIT_ONCE once,
         return TRUE;
 
     FlushInstructionCache(GetCurrentProcess(), base, nt->OptionalHeader.SizeOfImage);
-    log_debug(plfHooks,
-              "[cg] Cg %s non-NVIDIA compatibility: emit ARB program.%s bindings%s",
-              target->version, intel && patchFormats ? "env" : "local",
-              shadowOptionOperand != NULL ? " with Intel 2D shadow downgrade" : "");
+    if (patchFormats)
+        log_debug(plfHooks,
+                  "[cg] Cg %s non-NVIDIA compatibility: emit ARB program.%s bindings",
+                  target->version, envBank ? "env" : "local");
+    if (shadowOptionOperand != NULL)
+        log_debug(plfHooks,
+                  "[cg] Cg %s non-NVIDIA compatibility: Intel 2D shadow downgrade",
+                  target->version);
     return TRUE;
 }
 
@@ -591,12 +597,8 @@ static void dumpCgAssemblyIfRequested(int profile, const char *assembly,
 
 int hook_CgGLIsProfileSupported(int profile)
 {
-    uint8_t gpuVendor = getGPUVendorID();
-
-    if (gpuVendor == NVIDIA_GPU)
-    {
+    if (!gpuCompat_on(GPU_COMPAT_CG_ARB_PROFILES))
         return next_CgGLIsProfileSupported ? next_CgGLIsProfileSupported(profile) : 0;
-    }
 
     switch (profile)
     {
@@ -655,51 +657,49 @@ const char *hook_CgGetProgramString(char *program, int pname)
 
 char *hook_CgCreateProgram(size_t *context, int program_type, const char *program, int profile, const char *entry, const char **args)
 {
-    uint8_t gpuVendor = getGPUVendorID();
+    static const char *op6150[] = {"NumTemps=31", "MaxInstructions=1024", "MaxAddressRegs=1", "MaxLocalParams=256", NULL};
+    static const char *op7000[] = {"NumTemps=256",
+                                   "NumInstructionSlots=1447",
+                                   "MaxLocalParams=256",
+                                   "NumTexInstructionSlots=1447",
+                                   "NumMathInstructionSlots=1447",
+                                   "MaxTexIndirections=128",
+                                   "MaxDrawBuffers=8",
+                                   NULL};
     BOOL useManualConstantBinding;
     int previousAutoCompile = 0;
     unsigned int boundConstants = 0;
 
-    if (gpuVendor == NVIDIA_GPU)
+    if (!gpuCompat_on(GPU_COMPAT_CG_COMPILER))
     {
         return next_CgCreateProgram(context, program_type, program, profile, entry, NULL);
     }
 
-    if (isPortableGpuVendor(gpuVendor))
+    if (wantsCgCompilerPatch())
         InitOnceExecuteOnce(&g_cg_patch_once, patchCgCompilerForNonNvidia,
                             NULL, NULL);
 
-    if (profile == CG_PROFILE_VP20 || profile == CG_PROFILE_VP30 ||
-        profile == CG_PROFILE_ARBVP1 || profile == CG_PROFILE_VP40)
-        profile = CG_PROFILE_ARBVP1;
-    else if (profile == CG_PROFILE_FP20 || profile == CG_PROFILE_FP30 ||
-             profile == CG_PROFILE_FP40 || profile == CG_PROFILE_ARBFP1)
-        profile = CG_PROFILE_ARBFP1;
+    if (gpuCompat_on(GPU_COMPAT_CG_ARB_PROFILES))
+    {
+        if (profile == CG_PROFILE_VP20 || profile == CG_PROFILE_VP30 ||
+            profile == CG_PROFILE_ARBVP1 || profile == CG_PROFILE_VP40)
+            profile = CG_PROFILE_ARBVP1;
+        else if (profile == CG_PROFILE_FP20 || profile == CG_PROFILE_FP30 ||
+                 profile == CG_PROFILE_FP40 || profile == CG_PROFILE_ARBFP1)
+            profile = CG_PROFILE_ARBFP1;
+        else
+            log_debug(plfHooks, "profile %d passed through unnormalized\n", profile);
+
+        if (profile == CG_PROFILE_ARBVP1)
+            args = op6150;
+        else if (profile == CG_PROFILE_ARBFP1)
+            args = op7000;
+    }
     else
-        log_debug(plfHooks, "profile %d passed through unnormalized\n", profile);
-
-    const char *op6150[] = {"NumTemps=31", "MaxInstructions=1024", "MaxAddressRegs=1", "MaxLocalParams=256", NULL};
-
-    const char *op7000[] = {"NumTemps=256",
-                            "NumInstructionSlots=1447",
-                            "MaxLocalParams=256",
-                            "NumTexInstructionSlots=1447",
-                            "NumMathInstructionSlots=1447",
-                            "MaxTexIndirections=128",
-                            "MaxDrawBuffers=8",
-                            NULL};
-
-    if (profile == CG_PROFILE_ARBVP1)
-    {
-        args = op6150;
-    }
-    else if (profile == CG_PROFILE_ARBFP1)
-    {
-        args = op7000;
-    }
+        args = NULL; /* as on NVIDIA */
 
     useManualConstantBinding =
-        isPortableGpuVendor(gpuVendor) && GLHooks_IdasArbCompat() &&
+        gpuCompat_onKnownVendor(GPU_COMPAT_PINNED_UNIFORMS) &&
         program_type == CG_PROGRAM_SOURCE && profile == CG_PROFILE_ARBVP1 &&
         canBindCompilerUniformSemantics();
     if (useManualConstantBinding)

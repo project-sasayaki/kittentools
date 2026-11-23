@@ -2,6 +2,7 @@
 #include "wmmt3Config.h"
 #include "../../init.h"
 #include "../games.h"
+#include "../../graphics/gpuCompat.h"
 #include "../../devices/device.h"
 #include "../../devices/strpcb.h"
 #include "../../devices/namcoJvio.h"
@@ -93,6 +94,11 @@ static const GameModule WMMT3_Module = {
     .prepatch = init_wmmt3_prepatch,
     .config = &Wmmt3ConfigTable,
     .configGroups = wmmt3_config_groups,
+    /* Alchemy's shaders are already portable ARB programs fed from conventional
+     * arrays, so Cg's semantic and constant-bank patches stay off (they broke it);
+     * only the NVIDIA-only leftovers and Intel's shadow samplers are handled. */
+    .gpuCompat = GPU_COMPAT_CG_ARB_PROFILES | GPU_COMPAT_INTEL_SHADOW |
+                 GPU_COMPAT_NV_ASM_RECOMPILE | GPU_COMPAT_NV_ATTRIB_ALIASING,
 };
 
 MODULE_REGISTER(WMMT3_Module);

@@ -5,7 +5,7 @@
 #include "glHooks.h"
 #include "collections.h"
 #include "../config/config.h"
-#include "../graphics/gpuVendor.h"
+#include "../graphics/gpuCompat.h"
 #include "../graphics/internalRes.h"
 #include "../log/log.h"
 #include "../graphics/msaa.h"
@@ -33,24 +33,6 @@ typedef struct
     GLfloat values[2][ARB_PARAMETER_CACHE_SIZE][4];
     BYTE valid[2][ARB_PARAMETER_CACHE_SIZE];
 } ArbParameterCache;
-
-static volatile LONG s_idasArbCompat = 1;
-
-void GLHooks_SetIdasArbCompat(int enabled)
-{
-    InterlockedExchange(&s_idasArbCompat, enabled ? 1 : 0);
-}
-
-int GLHooks_IdasArbCompat(void)
-{
-    return s_idasArbCompat != 0;
-}
-
-/* NVIDIA_GPU while the Initial D workarounds are off. */
-static uint8_t idasCompatVendor(void)
-{
-    return s_idasArbCompat ? getGPUVendorID() : NVIDIA_GPU;
-}
 
 static SRWLOCK s_arbParameterCacheLock = SRWLOCK_INIT;
 static ArbParameterCache s_arbParameterCaches[ARB_PARAMETER_CACHE_CONTEXTS];
@@ -128,10 +110,11 @@ void __attribute__((cdecl)) wrap_glProgramStringARB(GLenum target, GLenum format
             target = GL_VERTEX_PROGRAM_ARB;
 
         /* vp40/fp40 programs only load on NVIDIA. */
-        uint8_t gpuVendor = getGPUVendorID();
-        if (gpuVendor != NVIDIA_GPU)
+        if (gpuCompat_on(GPU_COMPAT_NV_ASM_RECOMPILE))
         {
-            char *portable = nvShader_recompileNvAssembly(s, (size_t)len, idasCompatVendor() == INTEL_GPU);
+            /* Constants go to the bank the uploads are routed to. */
+            char *portable = nvShader_recompileNvAssembly(
+                s, (size_t)len, gpuCompat_onIntel(GPU_COMPAT_CONSTANT_BANKS));
             if (portable)
             {
                 glad_glProgramStringARB(target, format, (GLsizei)strlen(portable), portable);
@@ -147,8 +130,7 @@ void __attribute__((cdecl)) wrap_glProgramStringARB(GLenum target, GLenum format
 void __attribute__((cdecl)) wrap_glProgramEnvParameter4fvARB(GLenum target, GLuint index,
                                                               const GLfloat *params)
 {
-    uint8_t gpuVendor = idasCompatVendor();
-    BOOL mirrorToLocal = gpuVendor == AMD_GPU || gpuVendor == ATI_GPU;
+    BOOL mirrorToLocal = gpuCompat_onAmd(GPU_COMPAT_CONSTANT_BANKS);
 
     /* ID5 normally rewrites Cg's program.local declarations to program.env and
      * consequently uploads constants through the env API.  The AMD compiler
@@ -169,8 +151,7 @@ void __attribute__((cdecl)) wrap_glProgramEnvParameters4fvEXT(GLenum target, GLu
                                                                GLsizei count,
                                                                const GLfloat *params)
 {
-    uint8_t gpuVendor = idasCompatVendor();
-    BOOL mirrorToLocal = gpuVendor == AMD_GPU || gpuVendor == ATI_GPU;
+    BOOL mirrorToLocal = gpuCompat_onAmd(GPU_COMPAT_CONSTANT_BANKS);
     GLsizei i;
 
     if (glad_glProgramEnvParameters4fvEXT)
@@ -203,12 +184,10 @@ void __attribute__((cdecl)) wrap_glProgramEnvParameters4fvEXT(GLenum target, GLu
 void __attribute__((cdecl)) wrap_glProgramLocalParameter4fvARB(GLenum target, GLuint index,
                                                                 const GLfloat *params)
 {
-    uint8_t gpuVendor = idasCompatVendor();
-
     /* shaderfix-idas keeps Intel's ARB constants in program.env.  IDAS also
      * sends one per-object value through the singular local entry point, so
      * redirect that call into the same bank. */
-    if (gpuVendor == INTEL_GPU)
+    if (gpuCompat_onIntel(GPU_COMPAT_CONSTANT_BANKS))
     {
         if (glad_glProgramEnvParameter4fvARB)
             glad_glProgramEnvParameter4fvARB(target, index, params);
@@ -221,7 +200,6 @@ void __attribute__((cdecl)) wrap_glProgramLocalParameter4fvARB(GLenum target, GL
 
 void __attribute__((cdecl)) wrap_glBindProgramARB(GLenum target, GLuint program)
 {
-    uint8_t gpuVendor;
     int targetIndex;
     ArbParameterCache *cache;
     unsigned int i;
@@ -230,9 +208,8 @@ void __attribute__((cdecl)) wrap_glBindProgramARB(GLenum target, GLuint program)
         return;
     glad_glBindProgramARB(target, program);
 
-    gpuVendor = idasCompatVendor();
     targetIndex = arbParameterTargetIndex(target);
-    if ((gpuVendor != AMD_GPU && gpuVendor != ATI_GPU) || targetIndex < 0 ||
+    if (!gpuCompat_onAmd(GPU_COMPAT_CONSTANT_BANKS) || targetIndex < 0 ||
         !glad_glProgramLocalParameter4fvARB)
         return;
 
@@ -250,11 +227,10 @@ void __attribute__((cdecl)) wrap_glBindProgramARB(GLenum target, GLuint program)
     ReleaseSRWLockShared(&s_arbParameterCacheLock);
 }
 
+/* Matches the Cg semantic patch, which binds every vertex input to ATTRn. */
 static BOOL useGenericImmediateAttributes(void)
 {
-    uint8_t gpuVendor = idasCompatVendor();
-    return gpuVendor == AMD_GPU || gpuVendor == ATI_GPU ||
-           gpuVendor == INTEL_GPU;
+    return gpuCompat_onKnownVendor(GPU_COMPAT_GENERIC_ATTRIBS);
 }
 
 static __thread GLenum s_clientActiveTexture = GL_TEXTURE0_ARB;
@@ -459,7 +435,7 @@ void __attribute__((cdecl)) wrap_glTexCoordPointer(GLint size, GLenum type,
  * 3 colour, 4 secondary colour, 5 fog, 8+n texcoord n); mirror them elsewhere. */
 static BOOL emulateNvAttribAliasing(void)
 {
-    return !s_idasArbCompat && getGPUVendorID() != NVIDIA_GPU;
+    return gpuCompat_on(GPU_COMPAT_NV_ATTRIB_ALIASING);
 }
 
 static void withClientTexture(GLuint unit, void (*fn)(void *), void *ctx)

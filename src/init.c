@@ -1,6 +1,6 @@
 #include "config/config.h"
 #include "graphics/gpuVendor.h"
-#include "config/config.h"
+#include "graphics/gpuCompat.h"
 #include <MinHook.h>
 #include "log/log.h"
 #include "games/games.h"
@@ -52,6 +52,8 @@ bool KittenInit(uint32_t crc)
                 .groups = module->configGroups ? module->configGroups(crc) : 0,
             };
             config_write(module->sharedConfig, &own, 1);
+
+            gpuCompat_setFeatures(module->gpuCompat);
 
             module->init();
 
