@@ -307,7 +307,22 @@ void init_idas_prepatch(uint32_t crc)
     if (balloonStatus != MH_OK)
         log_error(plfBridges, "Failed to install IDAS dialogue balloon hook: %d", (int)balloonStatus);
     MH_CreateHook((LPVOID)get_native_symbol_ptr("_ZN7cCredit14displayTextureEPNS_9__texuvwhEiii"), hook_cCreditdisplayTexture, (void**)&next_cCreditdisplayTexture);
-    MH_CreateHook((LPVOID)get_native_symbol_ptr("_ZN6_sFont3putEfft"), hook_sFont_put, (void**)&next_sFont_put);
+    // ID4 has no _sFont::put, so shift balloon text in drawText instead.
+    LPVOID fontPut = (LPVOID)get_native_symbol_ptr("_ZN6_sFont3putEfft");
+    if (fontPut)
+    {
+        MH_CreateHook(fontPut, hook_sFont_put, (void**)&next_sFont_put);
+    }
+    else
+    {
+        MH_STATUS textStatus = MH_CreateHook(
+            (LPVOID)get_native_symbol_ptr("_ZN12cDemoBalloon8drawTextEP14_sSceneManagerff"),
+            hook_drawtext, (void**)&next_drawtext);
+        if (textStatus != MH_OK)
+            log_error(plfBridges, "Failed to install IDAS dialogue text hook: %d", (int)textStatus);
+        else
+            log_info(plfBridges, "Balloon text shift via cDemoBalloon::drawText (no _sFont::put)");
+    }
     MH_CreateHook((LPVOID)get_native_symbol_ptr("_ZN9_sFiTFont11setClipRectEPKN8_sSerial6_sRectE"), hook_setClipRect, (void**)&next_setClipRect);
 
 }
