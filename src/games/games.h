@@ -15,6 +15,9 @@ typedef struct GameModule {
     const ConfigTable *config;
     /* The GROUP()s of its own settings that the version with this CRC has (NULL = it has no GROUP()). */
     unsigned (*configGroups)(uint32_t crc32);
+    /* GpuCompatFeature mask (graphics/gpuCompat.h) of the workarounds its renderer needs on
+     * non-NVIDIA GPUs; 0 = none, the game runs as it would on NVIDIA. */
+    unsigned gpuCompat;
 } GameModule;
 
 #define MODULE_REGISTER(module) \

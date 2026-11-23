@@ -10,7 +10,7 @@
 #include <direct.h>
 #include <shlwapi.h>
 #include "../config/config.h"
-#include "../graphics/gpuVendor.h"
+#include "../graphics/gpuCompat.h"
 #include "../elfLoader/graphics.h"
 #include "../log/log.h"
 #include "file.h"
@@ -234,7 +234,6 @@ FILE *hook_fopen(const char *restrict pathname, const char *restrict mode)
     void *address = __builtin_return_address(0);
     char newPath[KITTEN_PATH_MAX];
     char *path = (char *)pathname;
-    uint8_t gpu_id = getGPUVendorID();
     FILE *(*_fopen)(const char *restrict pathname, const char *restrict mode) = REAL_FUNC(fopen);
     
     static BOOL warning = false;
@@ -247,18 +246,12 @@ FILE *hook_fopen(const char *restrict pathname, const char *restrict mode)
         return 0;
     }
 
-    /* On non-NVIDIA GPUs, reject cached NVIDIA assembly so the game asks Cg
-     * to compile the original source for the portable ARB profiles. */
-    if (gpu_id != NVIDIA_GPU)
-    {
-        if ((strstr(pathname, "asm_lbg") != NULL) || (strstr(pathname, "asm_gl") != NULL))
-        {
-            /* The game will have to recompile from Cg source (same refusal as
-             * LinuxLoader's sharedFopen). */
-            return 0;
-        }
-
-    }
+    /* Reject cached NVIDIA assembly so the game asks Cg to compile the
+     * original source for the portable ARB profiles (same refusal as
+     * LinuxLoader's sharedFopen). */
+    if (gpuCompat_on(GPU_COMPAT_SKIP_ASM_CACHE) &&
+        (strstr(pathname, "asm_lbg") != NULL || strstr(pathname, "asm_gl") != NULL))
+        return 0;
     
     path = (char *)mapGuestTmpPath(pathname, newPath);
     const char *redirect = redirected_path(pathname);
